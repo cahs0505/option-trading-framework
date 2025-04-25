@@ -2,3 +2,5 @@
 ca-certificate.crt
 __pycache__
 test.py
+command.txt
+script.py

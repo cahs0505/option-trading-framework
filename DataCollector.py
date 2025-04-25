@@ -6,6 +6,7 @@ import threading
 import logging
 import datetime
 import queue
+import argparse
 
 from Database import Database
 from typing import List
@@ -29,10 +30,10 @@ class DataCollector:
     exp_curr : int = 0
 
 
-    job_manager : Job
-    price_updater: Job
-    on_market_open: Job
-    on_market_close: Job
+    job_manager : Job = None 
+    price_updater: Job = None 
+    on_market_open: Job = None 
+    on_market_close: Job = None 
 
 
     def __init__(self,
@@ -109,14 +110,14 @@ class DataCollector:
     
     def handle_market_open(self):
 
-        if self.check_open() and self.option_updater == None :
+        if self.check_open() and self.option_updater is None :
 
             logger.info(f"Starting option updater")
             self.option_updater = self.scheduler.add_job(self.update_option, 'interval', seconds=15)
         
     def handle_market_close(self):
 
-        if not self.check_open() and self.option_updater != None:
+        if not self.check_open() and self.option_updater is not None:
 
             logger.info(f"Shutting down option updater")
             self.option_updater.remove()
@@ -185,7 +186,16 @@ class DataCollector:
 
 
 if __name__ == "__main__":
-    db = Database()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-r', action='store_true')
+    parser.add_argument('-p', action='store_true')
+    args = parser.parse_args()
+    
+    db = Database(remote = args.r,
+                  use_proxy = args.p)
+    
     dc = DataCollector(db)
     dc.connect_and_init()
+    print(dc.db.get_symbols())
     dc.start()

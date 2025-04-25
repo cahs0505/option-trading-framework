@@ -16,7 +16,7 @@ from Constants import DataSource
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 load_dotenv(override=True)
-yf.set_config(proxy="PROXY_SERVER")
+
 
 class Database:
 
@@ -26,29 +26,51 @@ class Database:
     password: str
     source: DataSource
     pool: psycopg2.pool.ThreadedConnectionPool
+    remote: bool
+    use_proxy: bool
 
     #Timezone information
     nyse: mcal.market_calendar.MarketCalendar
 
+    #Proxies
     proxies : Dict
 
-    def __init__(self):
+    def __init__(self, 
+                 remote : bool = False,
+                 use_proxy: bool = False):
         
-        self.database_name = os.getenv("DATABASE_NAME")
-        self.user_name = os.getenv("DATABASE_USER")
-        self.password = os.getenv("DATABASE_PASSWORD")
-        self.host = os.getenv("DATABASE_HOST")
-        self.port = os.getenv("DATABASE_PORT")
+        if remote:
+            self.database_name = os.getenv("DATABASE_NAME")
+            self.user_name = os.getenv("DATABASE_USER")
+            self.password = os.getenv("DATABASE_PASSWORD")
+            self.host = os.getenv("DATABASE_HOST")
+            self.port = os.getenv("DATABASE_PORT")
+        else:
+            self.database_name = os.getenv("DATABASE_NAME_LOCAL")
+            self.user_name = os.getenv("DATABASE_USER_LOCAL")
+            self.password = os.getenv("DATABASE_PASSWORD_LOCAL")
+            self.host = os.getenv("DATABASE_HOST_LOCAL")
+            self.port = os.getenv("DATABASE_PORT_LOCAL")
+
+        proxy_username = os.getenv("PROXY_USERNAME")
+        proxy_password = os.getenv("PROXY_PASSWORD")
+        proxy_country = os.getenv("PROXY_COUNTRY")
+        proxy_host = os.getenv("PROXY_HOST")
+
+        self.remote = remote
+        self.use_proxy = use_proxy
         self.source = DataSource.LOCAL
         self.pool = None
     
         self.nyse = mcal.get_calendar('NYSE')
 
-        username = os.getenv("PROXY_USERNAME")
-        password = os.getenv("PROXY_PASSWORD")
-        country = os.getenv("PROXY_COUNTRY")
-        host = os.getenv("PROXY_HOST")
-        self.proxies ={"http" :('http://user-%s-country-%s:%s@%s'%(username,country,password,host))}
+        if self.use_proxy:
+            logger.info(f"Using proxy: {proxy_host}")
+            yf.set_config(proxy="PROXY_SERVER")
+            self.proxies = {"http" :('http://user-%s-country-%s:%s@%s'%(proxy_username,proxy_country,proxy_password,proxy_host))}
+        else:
+            logger.info("Use without proxy")
+            self.proxies = None
         
     def connect(self) -> None:
         logger.info(f"Connecting...")
@@ -57,12 +79,12 @@ class Database:
         logger.info(f"Port: {self.port}")
         logger.info(f"Username: {self.user_name}")
         self.pool = psycopg2.pool.ThreadedConnectionPool(minconn=10, 
-                                                          maxconn=10,
-                                                          user=self.user_name,
-                                                          password=self.password,
-                                                          database=self.database_name,
-                                                          host = self.host,
-                                                          port = self.port)
+                                                        maxconn=10,
+                                                        user=self.user_name,
+                                                        password=self.password,
+                                                        database=self.database_name,
+                                                        host = self.host,
+                                                        port = self.port)
         
     def disconnect(self) -> None:
         logger.info(f"Disconnecting from {self.database_name}") 
@@ -485,6 +507,19 @@ class Database:
             cur.close()
             self.pool.putconn(conn)
 
+    def add_ticker(self, symbol : str) -> None:
+        pass
+
+    def add_ticker(self, symbol : List) -> None:
+        pass
+
+    def remove_ticker(self, symbol : str) -> None:
+        pass
+
+    def remove_ticker(self, symbol : List) -> None:
+        pass
+
+
 
     def get_symbols(self) -> List:
 
@@ -496,7 +531,7 @@ class Database:
             return
         
         try:
-            sql = f"SELECT * FROM ticker"
+            sql = f"SELECT * FROM ticker ORDER BY market_cap DESC"
             cur.execute(sql)
             data = [r[0] for r in cur.fetchall()]
 
