@@ -13,7 +13,7 @@ from typing import List
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.job import Job
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 class DataCollector:
@@ -99,8 +99,9 @@ class DataCollector:
     def check_open(self) -> bool:
         
         exchange = mcal.get_calendar("NYSE")
-        start = (pd.Timestamp.utcnow() - pd.DateOffset(1)).strftime('%Y-%m-%d')
-        end = (pd.Timestamp.utcnow() + pd.DateOffset(1)).strftime('%Y-%m-%d')
+        start = (pd.Timestamp.utcnow() - pd.DateOffset(7)).strftime('%Y-%m-%d')
+        end = (pd.Timestamp.utcnow() + pd.DateOffset(7)).strftime('%Y-%m-%d')
+
         schedule = exchange.schedule(start_date=start, end_date=end)
 
         self.is_market_open = exchange.is_open_now(schedule)
