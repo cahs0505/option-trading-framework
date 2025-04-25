@@ -1,0 +1,701 @@
+import yfinance as yf
+import psycopg2
+import psycopg2.pool
+import os
+import pandas as pd
+import numpy as np
+import pandas_market_calendars as mcal
+import logging
+import threading
+
+from psycopg2.extras import execute_values
+from dotenv import load_dotenv
+from typing import List
+from Constants import DataSource
+
+
+logger = logging.getLogger(__name__)
+load_dotenv(override=True)
+
+class Database:
+
+    ##Basic database config
+    database_name : str
+    user_name: str
+    password: str
+    source: DataSource
+    pool: psycopg2.pool.ThreadedConnectionPool
+
+    #Timezone information
+    nyse: mcal.market_calendar.MarketCalendar
+
+    def __init__(self):
+        
+        self.database_name = os.getenv("DATABASE_NAME")
+        self.user_name = os.getenv("DATABASE_USER")
+        self.password = os.getenv("DATABASE_PASSWORD")
+        self.source = DataSource.LOCAL
+        self.pool = None
+    
+        self.nyse = mcal.get_calendar('NYSE')
+
+        
+    def connect(self) -> None:
+        logger.info(f"Connecting to {self.database_name}")
+        logger.info(f"Username: {self.user_name}")
+        self.pool = psycopg2.pool.ThreadedConnectionPool(minconn=30, 
+                                                          maxconn=30,
+                                                          user=self.user_name,
+                                                          password=self.password,
+                                                          database=self.database_name)
+        
+    def disconnect(self) -> None:
+        logger.info(f"Disconnecting from {self.database_name}") 
+        self.pool.closeall()
+
+    def set_source(self, 
+                   source: DataSource) -> None:
+        self.source = source
+
+    #OHLCV data using YFinance
+    def create_price_table_yf(self) -> None:
+        
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+            return
+
+        try:
+            sql = f"""CREATE TABLE price_yf (
+                        time TIMESTAMPTZ NOT NULL,
+                        symbol TEXT NOT NULL,
+                        open REAL,
+                        close REAL,
+                        high REAL,
+                        low REAL,
+                        volume INTEGER
+                    );
+            )"""
+
+            cur.execute(sql)
+            cur.execute("SELECT create_hypertable('price_yf', 'time', 'symbol');")
+            conn.commit()
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error for: {e}")
+            
+        except Exception as e:
+            logger.error(f"Unexpected error for: {e}")
+
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+
+
+    def create_price_history_yf(self,
+                            symbol: str) -> None:
+        
+        logger.info(f"Creating price history: {symbol}")
+
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+            
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+            return
+        
+        try:
+            sql = f"SELECT EXISTS(SELECT 1 FROM price_yf WHERE symbol='{symbol}')"
+            cur.execute(sql)
+            data = cur.fetchone()
+            
+            if(data[0]):
+                logger.info(f"Price history already exists: {symbol}")
+                
+            else:
+                ticker = yf.Ticker(symbol)
+
+                df = ticker.history('max')
+
+                if df.empty:
+                    logger.error(f"Fetch failed, empty data: {symbol}")
+                    return
+                    # raise ApiError(f"Fetch failed, empty data: {symbol}")
+                
+                df.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume" :"volume", "Dividends" : "dividends", "Stock Splits": "splits"},inplace=True)
+                df['symbol'] = symbol
+                df.index = (df.index+ pd.DateOffset(hours=16)).tz_convert("UTC")
+
+                data = list(df[['open','high','low','close','volume','symbol']].itertuples(index=True, name=None))
+
+                TABLE = "price_yf"
+                COLUMNS = ["time", "open", "high", "low", "close", "volume","symbol"]
+                sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
+
+                execute_values(cur, sql, data)  
+                conn.commit()
+                logger.info(f"Price history created: {symbol}")
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error for {symbol}: {e}")
+            
+        except Exception as e:
+            logger.error(f"Unexpected error for {symbol}: {e}")
+
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+        
+
+    def get_price_history_yf(self,
+                        symbol: str,
+                        history: str,
+                        columns: List) -> pd.DataFrame:
+        
+        
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+            
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+            return
+
+        try:
+            sql = f"SELECT {','.join(columns)} FROM price_yf WHERE symbol = %s AND TIME>=NOW() - INTERVAL %s ORDER BY time;"
+            cur.execute(sql,(symbol,history))
+            data = cur.fetchall()
+            df = pd.DataFrame(data, columns=columns)        
+            df.set_index("time", inplace=True)
+            df.index = pd.to_datetime(df.index, utc=True)
+            return df
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error for {symbol}: {e}")
+            
+        except Exception as e:
+            logger.error(f"Unexpected error for {symbol}: {e}")
+
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+
+        
+    
+    def update_price_history_yf(self,
+                             symbol: str) -> None:
+        
+        logger.info(f"Updating price history: {symbol}")
+
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+
+            logger.debug(f"Checking last row: {symbol}")
+            sql = f"SELECT time FROM price_yf WHERE symbol = %s AND time >= NOW() - INTERVAL '7 days' ORDER BY time DESC LIMIT 1;"
+            cur.execute(sql,(symbol,))
+            data = cur.fetchall()
+            logger.debug(data)
+            if len(data) == 0:
+                self.create_price_history_yf(symbol)
+                return
+            
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+            self.pool.putconn(conn)
+            return 
+
+        try:
+            last = pd.Timestamp(data[0][0]).tz_convert("UTC")
+            last_string = last.strftime("%Y-%m-%d")
+
+            logger.debug(f"Last row: {symbol} - {last_string}")
+
+            now = pd.Timestamp.utcnow()
+            now_string = now.strftime("%Y-%m-%d")
+
+            ######to extend to all exchange######
+            range = self.nyse.schedule(start_date=last_string, end_date=now_string)
+
+            #drop first row (which is last row in db)
+            if(len(range) == 1):
+                logger.info(f"Price history already updated: {symbol}")
+                return
+            range = range.iloc[1:]
+
+            #drop last row if not yet market close
+            if(now < range.iloc[-1].market_close):
+                if(len(range) == 1):
+                    logger.info(f"Price history already updated: {symbol}")
+                    return
+                else:
+                    range = range[:-1]
+            
+
+            ##add one day to to_string because how yfinance work (end date is not included)
+            from_string = range.market_close.iloc[0].strftime("%Y-%m-%d")
+            to_string = (range.market_close.iloc[-1]+ pd.DateOffset(1)).strftime("%Y-%m-%d")
+    
+            if not range.empty: 
+
+                logger.debug(f"Fetching for: {symbol}")
+                ticker = yf.Ticker(symbol)
+                df = ticker.history(interval="1d", start=from_string, end=to_string)
+                
+                if df.empty:
+                    logger.error(f"Fetch failed, empty data: {symbol}")
+                    return
+
+                df.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume" :"volume", "Dividends" : "dividends", "Stock Splits": "splits"},inplace=True)
+                df['symbol'] = symbol
+                df.index = (df.index+ pd.DateOffset(hours=16)).tz_convert("UTC")
+    
+                
+                if not df.empty: 
+                    data = list(df[['open','high','low','close','volume','symbol']].itertuples(index=True, name=None))
+
+                    TABLE = "price_yf"
+                    COLUMNS = ["time", "open", "high", "low", "close", "volume", "symbol"]
+                    sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
+
+                    execute_values(cur, sql, data)  
+                    conn.commit()
+            
+            else:
+                logger.info(f"Price history already updated: {symbol}")
+
+            logger.info(f"Price history updated: {symbol}")
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error for {symbol}: {e}")
+            
+        except Exception as e:
+            logger.error(f"Unexpected error for {symbol}: {e}")
+
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+        
+
+    def update_price_history_bulk_yf(self,
+                                symbols : List) -> None:
+
+        logger.info(f"Updating price : {symbols} ")
+
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+
+            logger.debug(f"Checking last row")
+            sql = f"SELECT time FROM price_yf WHERE symbol = 'MSFT' AND time >= NOW() - INTERVAL '7 days' ORDER BY time DESC LIMIT 1;"
+            cur.execute(sql)
+            data = cur.fetchall()
+            
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+            self.pool.putconn(conn)
+            return 
+
+        try:
+            last = pd.Timestamp(data[0][0]).tz_convert("UTC")
+            last_string = last.strftime("%Y-%m-%d")
+
+            logger.debug(f"Last row:{last_string}")
+
+            now = pd.Timestamp.utcnow()
+            now_string = now.strftime("%Y-%m-%d")
+
+            ######to extend to all exchange######
+            range = self.nyse.schedule(start_date=last_string, end_date=now_string)
+
+            #drop first row (which is last row in db)
+            if(len(range) == 1):
+                logger.info(f"Price history already updated")
+                return
+            range = range.iloc[1:]
+
+            #drop last row if not yet market close
+            if(now < range.iloc[-1].market_close):
+                if(len(range) == 1):
+                    logger.info(f"Price history already updated")
+                    return
+                else:
+                    range = range[:-1]
+            
+
+            ##add one day to to_string because how yfinance work (end date is not included)
+            from_string = range.market_close.iloc[0].strftime("%Y-%m-%d")
+            to_string = (range.market_close.iloc[-1]+ pd.DateOffset(1)).strftime("%Y-%m-%d")
+            
+            data = []
+
+            if not range.empty: 
+                logger.debug(f"Fetching for: {symbols}")
+                df = yf.download(symbols, period='5d',start=from_string,end=to_string)
+                df.dropna(axis=1,inplace=True)
+                df.columns = df.columns.remove_unused_levels().set_levels(['close','high','low','open','volume'],level=0)
+                df.index = (df.index+ pd.DateOffset(hours=20)).tz_localize("UTC")
+
+                if not df.empty:    
+
+                    for symbol in symbols:
+
+                        try:
+                            curr_df = df.xs(symbol, level='Ticker', axis=1)
+                            curr_df["symbol"] = symbol
+                            curr_data = list(curr_df[['open','high','low','close','volume','symbol']].itertuples(index=True, name=None))
+                            data += curr_data
+                        except ValueError as e:
+                            logger.error(f"{symbol} does not exist")
+                        except Exception as e:
+                            logger.error(f"{symbol}: unexpected error")
+                
+                    TABLE = "price_yf"
+                    COLUMNS = ["time", "open", "high", "low", "close", "volume", "symbol"]
+                    sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
+
+                    execute_values(cur, sql, data)  
+                    conn.commit()
+                        
+            else:
+                logger.info(f"Price history already updated: {symbol}")
+
+            logger.info(f"Price history updated: {symbol}")
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error for {symbols}: {e}")
+            
+        except Exception as e:
+            logger.error(f"Unexpected error for {symbols}: {e}")
+
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+
+
+    #overview of all tickers
+    def create_tickers_overview(self,
+                                df: pd.DataFrame) -> None:
+        
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+            return
+        
+        try:
+
+            if not df.empty:
+                data = list(df[["symbol","market_cap","industry","sector","asset_type"]].itertuples(index=False, name=None))
+
+                TABLE = "ticker"
+                COLUMNS = ["symbol", "market_cap", "industry", "sector", "asset_type"]
+                sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
+
+                execute_values(cur, sql, data)
+                conn.commit()
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+
+        except:
+            logger.error(f"Unexpecte error for: {e}")
+        
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+
+    def get_tickers_overview(self) -> pd.DataFrame:
+
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+            return
+        
+        try:
+            sql = f"SELECT * FROM ticker"
+            cur.execute(sql)
+            data = cur.fetchall()
+            df = pd.DataFrame(data)
+            return df 
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+
+        except Exception as e:
+            logger.error(f"Unexpecte error for: {e}")
+        
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+    
+    def update_tickers_overview(self,
+                               symbol : str) -> None:
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+            return
+        
+        try:
+            ticker = yf.Ticker(symbol)
+            market_cap = ticker.info["marketCap"]
+            sql = """
+                    UPDATE ticker 
+                    SET market_cap = %(market_cap)s
+                    WHERE symbol = %(symbol)s;
+                """
+            value = {
+                "market_cap" : market_cap,
+                "symbol" : symbol,
+            }
+            cur.execute(sql,value)
+            conn.commit()
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+
+        except Exception as e:
+            logger.error(f"Unexpecte error for: {e}")
+        
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+
+
+    def get_symbols(self) -> List:
+
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+            return
+        
+        try:
+            sql = f"SELECT * FROM ticker"
+            cur.execute(sql)
+            data = [r[0] for r in cur.fetchall()]
+
+            return data 
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
+        
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+
+    
+    #option data
+
+    def create_option_table_yf(self) -> None:
+
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+            return
+
+        try:
+            
+            sql = f"""CREATE TABLE option_yf (
+                        time TIMESTAMPTZ NOT NULL,
+                        contract TEXT NOT NULL,
+                        symbol TEXT NOT NULL,
+                        strike REAL NOT NULL,
+                        expiry DATE NOT NULL,
+                        call_put CHAR(1) NOT NULL,
+                        last_price REAL,
+                        bid REAL,
+                        ask REAL,
+                        volume INTEGER,
+                        open_interest INTEGER,
+                        moneyness CHAR(1)
+                    );
+            """
+
+            cur.execute(sql)
+            cur.execute("SELECT create_hypertable('option_yf', 'time', 'symbol', number_partitions => 4);")
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+
+        except Exception as e:
+            logger.error(f"Unexpecte error: {e}")
+        
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+
+    def insert_option_price_yf(self,
+                            symbol: str,
+                            expiry: str, 
+                            range: int = 5,         #At the money +- range
+                            ) -> None:
+        
+        logger.info(f"Handling option: {symbol} - {expiry}")
+  
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+            return
+
+        ticker = yf.Ticker(symbol)
+
+        try:
+            option = ticker.option_chain(expiry)
+
+            data = self._process_option_data(option=option, expiry=expiry, symbol=symbol, range=range)
+            logger.debug(data)
+
+            TABLE = "option_yf"
+            COLUMNS = ["time","contract","symbol","strike","expiry","call_put","last_price","bid","ask","volume","open_interest","moneyness"]
+            sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
+            execute_values(cur, sql, data)
+            conn.commit()
+
+        except ValueError:
+            logger.error(f"{symbol} - {expiry} does not exist.")
+            
+        
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+        
+        except Exception as e:
+            logger.error(f"Unexpected error for {symbol} - {expiry}: {e}")
+            
+
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+
+    def insert_option_price_yf(self,
+                            symbols: List,
+                            expiry: int,
+                            range: int = 5,         #At the money +- range
+                            ) -> None:
+        
+        logger.info(f"Handling option: {symbols} - {expiry}")
+  
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+            return
+
+        data_all = []
+        threads = []
+        tickers = yf.Tickers(symbols)
+
+        def _download_and_process(data_all, symbol, expiry, range):
+            try:
+                option = tickers.tickers[symbol].option_chain(expiry)
+                data = self._process_option_data(option=option, expiry=expiry, symbol=symbol, range=range)
+                data_all += data
+
+            except ValueError:
+                logger.error(f"{symbol} - {expiry} does not exist.")
+
+            except Exception as e:
+                logger.error(f"Unexpecte error for {symbol} - {expiry}: {e}")
+
+        try:
+
+            for symbol in symbols:
+                t = threading.Thread(target=_download_and_process, args=(data_all,symbol,expiry,range))
+                threads.append(t)
+    
+            for t in threads:
+                t.start()
+
+            for t in threads:
+                t.join()
+
+            TABLE = "option_yf"
+            COLUMNS = ["time","contract","symbol","strike","expiry","call_put","last_price","bid","ask","volume","open_interest","moneyness"]
+            sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
+            execute_values(cur, sql, data_all)
+            conn.commit()
+        
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+        
+        except Exception as e:
+            logger.error(f"Unexpecte error for {symbol} - {expiry}: {e}")
+                
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+    
+    def _process_option_data(self,
+                             option: pd.DataFrame,
+                             symbol: str,
+                             expiry: str,
+                             range: int) -> List:
+        
+            calls = option.calls
+            calls["call_put"] = 'c'
+            if not calls[calls.inTheMoney == True].empty:
+                
+                atm_idx = calls [calls.inTheMoney == True].iloc[-1:].index[0]
+                calls['moneyness'] = calls.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
+                calls.at[atm_idx, 'moneyness'] = 'a'
+
+                start_index = (atm_idx-range) if (atm_idx-range)>0 else 0
+                end_index = (atm_idx+range) if (atm_idx+range) < len(calls) else  len(calls)-1
+
+                calls = calls.iloc[start_index : end_index]
+            else:
+                calls['moneyness'] = calls.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
+                calls = calls.iloc[:range]
+
+            puts = option.puts
+            puts["call_put"] = 'p'
+            if not puts[puts.inTheMoney == True].empty:
+
+                atm_idx = puts [puts.inTheMoney == True].iloc[:1].index[0]
+                puts['moneyness'] = puts.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
+                puts.at[atm_idx, 'moneyness'] = 'a'
+
+                start_index = (atm_idx-range) if (atm_idx-range)>0 else 0
+                end_index = (atm_idx+range) if (atm_idx+range) < len(puts) else  len(puts)-1
+
+                puts = puts.iloc[start_index : end_index]
+            else:
+                puts['moneyness'] = puts.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
+                atm_idx = puts.iloc[-1:].index[0]
+                puts = puts.iloc[-range: ]
+
+            df = pd.concat([calls,puts])
+            df.rename(columns={"contractSymbol": "contract", "lastTradeDate": "time", "lastPrice": "last_price", "openInterest": "open_interest"},inplace=True)
+            df.drop(columns=['change','percentChange','impliedVolatility','inTheMoney','contractSize','currency'],inplace=True)
+            df["symbol"] = symbol
+            df["expiry"] = expiry
+            df = df.replace({np.nan: None})
+            data = list(df[["time","contract","symbol","strike","expiry","call_put","last_price","bid","ask","volume","open_interest","moneyness"]].itertuples(index=False, name=None))  
+
+            return data      
+        
+    def add_to_watchlist(self,
+                         symbol: str,
+                        ):
+        pass
+
