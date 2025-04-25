@@ -1,3 +1,4 @@
 .env
 ca-certificate.crt
 __pycache__
+test.py

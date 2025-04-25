@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from typing import List
 from Constants import DataSource
 
-
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 load_dotenv(override=True)
 
@@ -34,6 +34,8 @@ class Database:
         self.database_name = os.getenv("DATABASE_NAME")
         self.user_name = os.getenv("DATABASE_USER")
         self.password = os.getenv("DATABASE_PASSWORD")
+        self.host = os.getenv("DATABASE_HOST")
+        self.port = os.getenv("DATABASE_PORT")
         self.source = DataSource.LOCAL
         self.pool = None
     
@@ -41,13 +43,18 @@ class Database:
 
         
     def connect(self) -> None:
-        logger.info(f"Connecting to {self.database_name}")
+        logger.info(f"Connecting...")
+        logger.info(f"Host: {self.host}")
+        logger.info(f"Database: {self.database_name}")
+        logger.info(f"Port: {self.port}")
         logger.info(f"Username: {self.user_name}")
-        self.pool = psycopg2.pool.ThreadedConnectionPool(minconn=30, 
-                                                          maxconn=30,
+        self.pool = psycopg2.pool.ThreadedConnectionPool(minconn=10, 
+                                                          maxconn=10,
                                                           user=self.user_name,
                                                           password=self.password,
-                                                          database=self.database_name)
+                                                          database=self.database_name,
+                                                          host = self.host,
+                                                          port = self.port)
         
     def disconnect(self) -> None:
         logger.info(f"Disconnecting from {self.database_name}") 
@@ -698,4 +705,3 @@ class Database:
                          symbol: str,
                         ):
         pass
-
