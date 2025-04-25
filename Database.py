@@ -10,12 +10,13 @@ import threading
 
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
-from typing import List
+from typing import List, Dict
 from Constants import DataSource
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 load_dotenv(override=True)
+yf.set_config(proxy="PROXY_SERVER")
 
 class Database:
 
@@ -29,6 +30,8 @@ class Database:
     #Timezone information
     nyse: mcal.market_calendar.MarketCalendar
 
+    proxies : Dict
+
     def __init__(self):
         
         self.database_name = os.getenv("DATABASE_NAME")
@@ -41,6 +44,11 @@ class Database:
     
         self.nyse = mcal.get_calendar('NYSE')
 
+        username = os.getenv("PROXY_USERNAME")
+        password = os.getenv("PROXY_PASSWORD")
+        country = os.getenv("PROXY_COUNTRY")
+        host = os.getenv("PROXY_HOST")
+        self.proxies ={"http" :('http://user-%s-country-%s:%s@%s'%(username,country,password,host))}
         
     def connect(self) -> None:
         logger.info(f"Connecting...")
@@ -124,7 +132,7 @@ class Database:
                 logger.info(f"Price history already exists: {symbol}")
                 
             else:
-                ticker = yf.Ticker(symbol)
+                ticker = yf.Ticker(symbol,proxy=self.proxies)
 
                 df = ticker.history('max')
 
@@ -250,7 +258,7 @@ class Database:
             if not range.empty: 
 
                 logger.debug(f"Fetching for: {symbol}")
-                ticker = yf.Ticker(symbol)
+                ticker = yf.Ticker(symbol,proxy=self.proxies)
                 df = ticker.history(interval="1d", start=from_string, end=to_string)
                 
                 if df.empty:
@@ -342,7 +350,7 @@ class Database:
 
             if not range.empty: 
                 logger.debug(f"Fetching for: {symbols}")
-                df = yf.download(symbols, period='5d',start=from_string,end=to_string)
+                df = yf.download(symbols, period='5d',start=from_string,end=to_string,proxy=self.proxies)
                 df.dropna(axis=1,inplace=True)
                 df.columns = df.columns.remove_unused_levels().set_levels(['close','high','low','open','volume'],level=0)
                 df.index = (df.index+ pd.DateOffset(hours=20)).tz_localize("UTC")
@@ -453,7 +461,7 @@ class Database:
             return
         
         try:
-            ticker = yf.Ticker(symbol)
+            ticker = yf.Ticker(symbol,proxy=self.proxies)
             market_cap = ticker.info["marketCap"]
             sql = """
                     UPDATE ticker 
@@ -563,7 +571,7 @@ class Database:
             logger.error(f"Psycopg2 error: {e}")
             return
 
-        ticker = yf.Ticker(symbol)
+        ticker = yf.Ticker(symbol,proxy=self.proxies)
 
         try:
             option = ticker.option_chain(expiry)
@@ -610,11 +618,11 @@ class Database:
 
         data_all = []
         threads = []
-        tickers = yf.Tickers(symbols)
 
         def _download_and_process(data_all, symbol, expiry, range):
             try:
-                option = tickers.tickers[symbol].option_chain(expiry)
+                ticker = yf.Ticker(symbol,proxy=self.proxies)
+                option = ticker.option_chain(expiry)
                 data = self._process_option_data(option=option, expiry=expiry, symbol=symbol, range=range)
                 data_all += data
 

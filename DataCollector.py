@@ -86,7 +86,7 @@ class DataCollector:
     def get_expiration_dates(self, 
                              depth : int = 3) -> List:
         
-        ticker = yf.Ticker("MSFT")
+        ticker = yf.Ticker("MSFT",proxy=self.db.proxies)
         exp = ticker.options    
 
         self.option_expiry_depth = depth
