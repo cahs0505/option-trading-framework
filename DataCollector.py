@@ -13,7 +13,7 @@ from typing import List
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.job import Job
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class DataCollector:
@@ -29,9 +29,8 @@ class DataCollector:
     symbols_curr : int = 0
     exp_curr : int = 0
 
-
-    job_manager : Job = None 
     price_updater: Job = None 
+    option_updater: Job = None
     on_market_open: Job = None 
     on_market_close: Job = None 
 
@@ -67,8 +66,8 @@ class DataCollector:
         # self.price_updater = self.scheduler.add_job(self.update_price_bulk, 'cron', hour=20, minute=15)
 
         # on market open and on market close
-        self.on_market_open = self.scheduler.add_job(self.handle_market_open, 'cron', hour=13, minute=1)
-        self.on_market_close = self.scheduler.add_job(self.handle_market_close, 'cron', hour=20, minute=30)
+        self.on_market_open = self.scheduler.add_job(self.handle_market_open, 'cron', hour=13, minute=31)
+        self.on_market_close = self.scheduler.add_job(self.handle_market_close, 'cron', hour=20, minute=1)
 
         # add option updater
         if self.check_open():
@@ -154,7 +153,7 @@ class DataCollector:
         batch = self.symbols[self.symbols_curr : self.symbols_curr + BATCH_SIZE]
         expiry = self.option_expiry_dates[self.exp_curr]
 
-        self.db.insert_option_price_yf(batch,expiry)
+        self.db.insert_option_price_bulk_yf(batch,expiry)
 
         self.symbols_curr += BATCH_SIZE
         if self.symbols_curr >= len(self.symbols):

@@ -322,6 +322,7 @@ class Database:
                                 symbols : List) -> None:
 
         logger.info(f"Updating price : {symbols} ")
+        number = len(symbols)
 
         try:
             conn = self.pool.getconn()
@@ -371,8 +372,9 @@ class Database:
             data = []
 
             if not range.empty: 
-                logger.debug(f"Fetching for: {symbols}")
+                logger.debug(f"Fetching for: {number}")
                 df = yf.download(symbols, period='5d',start=from_string,end=to_string,proxy=self.proxies)
+                df = df[~(df.index < from_string)]
                 df.dropna(axis=1,inplace=True)
                 df.columns = df.columns.remove_unused_levels().set_levels(['close','high','low','open','volume'],level=0)
                 df.index = (df.index+ pd.DateOffset(hours=20)).tz_localize("UTC")
@@ -390,6 +392,8 @@ class Database:
                             logger.error(f"{symbol} does not exist")
                         except Exception as e:
                             logger.error(f"{symbol}: unexpected error")
+                        finally:
+                            continue
                 
                     TABLE = "price_yf"
                     COLUMNS = ["time", "open", "high", "low", "close", "volume", "symbol"]
@@ -399,9 +403,9 @@ class Database:
                     conn.commit()
                         
             else:
-                logger.info(f"Price history already updated: {symbol}")
+                logger.info(f"Price history already updated ({number})")
 
-            logger.info(f"Price history updated: {symbol}")
+            logger.info(f"Price history updated ({number})")
 
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error for {symbols}: {e}")
@@ -562,6 +566,7 @@ class Database:
         try:
             
             sql = f"""CREATE TABLE option_yf (
+                        time_of_snapshot TIMESTAMPTZ NOT NULL,
                         time TIMESTAMPTZ NOT NULL,
                         contract TEXT NOT NULL,
                         symbol TEXT NOT NULL,
@@ -574,6 +579,7 @@ class Database:
                         volume INTEGER,
                         open_interest INTEGER,
                         moneyness CHAR(1)
+                        implied_volatility REAL,
                     );
             """
 
@@ -615,7 +621,21 @@ class Database:
             logger.debug(data)
 
             TABLE = "option_yf"
-            COLUMNS = ["time","contract","symbol","strike","expiry","call_put","last_price","bid","ask","volume","open_interest","moneyness"]
+            COLUMNS = ["time_of_snapshot",
+                       "time",
+                       "contract",
+                       "symbol",
+                       "strike",
+                       "expiry",
+                       "call_put",
+                       "last_price",
+                       "bid",
+                       "ask",
+                       "volume",
+                       "open_interest",
+                       "moneyness",
+                       "implied_volatility"]
+            
             sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
             execute_values(cur, sql, data)
             conn.commit()
@@ -635,7 +655,7 @@ class Database:
             cur.close()
             self.pool.putconn(conn)
 
-    def insert_option_price_yf(self,
+    def insert_option_price_bulk_yf(self,
                             symbols: List,
                             expiry: int,
                             range: int = 5,         #At the money +- range
@@ -680,7 +700,21 @@ class Database:
                 t.join()
 
             TABLE = "option_yf"
-            COLUMNS = ["time","contract","symbol","strike","expiry","call_put","last_price","bid","ask","volume","open_interest","moneyness"]
+            COLUMNS = ["time_of_snapshot",
+                       "time",
+                       "contract",
+                       "symbol",
+                       "strike",
+                       "expiry",
+                       "call_put",
+                       "last_price",
+                       "bid",
+                       "ask",
+                       "volume",
+                       "open_interest",
+                       "moneyness",
+                       "implied_volatility"]
+            
             sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
             execute_values(cur, sql, data_all)
             conn.commit()
@@ -700,7 +734,8 @@ class Database:
                              symbol: str,
                              expiry: str,
                              range: int) -> List:
-        
+            
+            time_of_snapshot = pd.Timestamp.utcnow()
             calls = option.calls
             calls["call_put"] = 'c'
             if not calls[calls.inTheMoney == True].empty:
@@ -735,14 +770,38 @@ class Database:
                 puts = puts.iloc[-range: ]
 
             df = pd.concat([calls,puts])
-            df.rename(columns={"contractSymbol": "contract", "lastTradeDate": "time", "lastPrice": "last_price", "openInterest": "open_interest"},inplace=True)
-            df.drop(columns=['change','percentChange','impliedVolatility','inTheMoney','contractSize','currency'],inplace=True)
+
+            df.rename(columns={"contractSymbol": "contract", 
+                               "lastTradeDate": "time", 
+                               "lastPrice": "last_price", 
+                               "openInterest": 
+                               "open_interest", 
+                               "impliedVolatility": "implied_volatility"}
+                               ,inplace=True)
+
+            df.drop(columns=['change','percentChange','inTheMoney','contractSize','currency'],inplace=True)
             df["symbol"] = symbol
             df["expiry"] = expiry
+            df["time_of_snapshot"] = time_of_snapshot
             df = df.replace({np.nan: None})
-            data = list(df[["time","contract","symbol","strike","expiry","call_put","last_price","bid","ask","volume","open_interest","moneyness"]].itertuples(index=False, name=None))  
+ 
+            data = list(df[["time_of_snapshot",
+                            "time",
+                            "contract",
+                            "symbol",
+                            "strike",
+                            "expiry",
+                            "call_put",
+                            "last_price",
+                            "bid",
+                            "ask",
+                            "volume",
+                            "open_interest",
+                            "moneyness",
+                            "implied_volatility"]]
+                            .itertuples(index=False, name=None))  
 
-            return data      
+            return data   
         
     def add_to_watchlist(self,
                          symbol: str,
