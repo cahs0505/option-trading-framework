@@ -9,7 +9,7 @@ import queue
 import argparse
 
 from Database import Database
-from typing import List
+from typing import List, Dict
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.job import Job
 
@@ -23,14 +23,15 @@ class DataCollector:
     symbols: List
     is_market_open : bool
 
-    option_expiry_dates: List
-    option_expiry_depth : int
+    option_expiry_dates: Dict
+    option_expiry_depth : int = 3
     option_queue : queue.Queue
     symbols_curr : int = 0
     exp_curr : int = 0
 
     price_updater: Job = None 
     option_updater: Job = None
+    on_market_pre_open: Job = None
     on_market_open: Job = None 
     on_market_close: Job = None 
 
@@ -52,20 +53,46 @@ class DataCollector:
             self.db.connect()
         
         self.symbols = self.db.get_symbols()
-        self.option_expiry_dates = self.get_expiration_dates()
+        self.init_option_job_queue()
 
-        for exp in self.option_expiry_dates:
-            for symbol in self.symbols:
-                job = (symbol,exp)
-                self.option_queue.put(job)
+    def init_option_job_queue(self) -> None:
 
-     
+        threads = []
+
+        for symbol in self.symbols:
+            t = threading.Thread(target=self._put_job_queue, args=(symbol,))
+            threads.append(t)
+       
+        for t in threads:
+            t.start()
+
+        for t in threads:
+            t.join()
+
+    
+    def _put_job_queue(self, 
+                       symbol: str) -> None:
+            
+            ticker = yf.Ticker(symbol,proxy=self.db.proxies)
+            exp = ticker.options
+
+            for i in range(self.option_expiry_depth):
+
+                try:
+                    self.option_queue.put((symbol,exp[i]))
+
+                except Exception as e:
+                    logger.error(f"{symbol}: {e}")
+                    continue
+
     def start(self) -> None :
 
         #every day after market close
         # self.price_updater = self.scheduler.add_job(self.update_price_bulk, 'cron', hour=20, minute=15)
 
-        # on market open and on market close
+
+        # on market pre-open, open and close
+        self.on_market_pre_open = self.scheduler.add_job(self.handle_market_pre_open, 'cron', hour=13, minute=15)
         self.on_market_open = self.scheduler.add_job(self.handle_market_open, 'cron', hour=13, minute=31)
         self.on_market_close = self.scheduler.add_job(self.handle_market_close, 'cron', hour=20, minute=1)
 
@@ -107,15 +134,22 @@ class DataCollector:
         
         return self.is_market_open
 
-    
-    def handle_market_open(self):
+    def handle_market_pre_open(self) -> None:
+
+        self.init_option_job_queue()
+        self.check_open()
+
+    def handle_market_open(self) -> None:
 
         if self.check_open() and self.option_updater is None :
 
             logger.info(f"Starting option updater")
             self.option_updater = self.scheduler.add_job(self.update_option, 'interval', seconds=15)
+
+        elif not self.check_open() :
+            logger.info(f"Market is not open today")
         
-    def handle_market_close(self):
+    def handle_market_close(self) -> None:
 
         if not self.check_open() and self.option_updater is not None:
 
@@ -124,7 +158,7 @@ class DataCollector:
             self.option_updater = None
   
     def update_price(self, 
-                     BATCH_SIZE : int = 10):
+                     BATCH_SIZE : int = 10) -> None:
         
         for i in range(0, len(self.symbols), BATCH_SIZE):
 
@@ -143,22 +177,22 @@ class DataCollector:
             for t in threads:
                 t.join()
 
-    def update_price_bulk(self):
+    def update_price_bulk(self) -> None:
+        
         self.db.update_price_history_bulk_yf(self.symbols)
 
             
     def update_option(self, 
-                      BATCH_SIZE : int = 5) -> None: 
+                      BATCH_SIZE : int = 10) -> None: 
     
-        batch = self.symbols[self.symbols_curr : self.symbols_curr + BATCH_SIZE]
-        expiry = self.option_expiry_dates[self.exp_curr]
+        job_batch : List = []
 
-        self.db.insert_option_price_bulk_yf(batch,expiry)
+        for _ in range(BATCH_SIZE):
+            job = self.option_queue.get()
+            job_batch.append(job)
+            self.option_queue.put(job)
 
-        self.symbols_curr += BATCH_SIZE
-        if self.symbols_curr >= len(self.symbols):
-            self.symbols_curr = 0
-            self.exp_curr = (self.exp_curr + 1) % len(self.option_expiry_dates)
+        self.db.insert_option_price_bulk_yf(job_batch)
 
     def update_overview(self,
                         BATCH_SIZE : int = 10) -> None:
@@ -179,23 +213,3 @@ class DataCollector:
 
             for t in threads:
                 t.join()
-        
-
-
-        
-
-
-if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-r', action='store_true')
-    parser.add_argument('-p', action='store_true')
-    args = parser.parse_args()
-    
-    db = Database(remote = args.r,
-                  use_proxy = args.p)
-    
-    dc = DataCollector(db)
-    dc.connect_and_init()
-    print(dc.db.get_symbols())
-    dc.start()

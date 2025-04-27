@@ -3,5 +3,6 @@ ca-certificate.crt
 __pycache__
 test.py
 command.txt
-script.py
+script_local.py
 todo
+analysis.ipynb

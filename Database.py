@@ -656,12 +656,12 @@ class Database:
             self.pool.putconn(conn)
 
     def insert_option_price_bulk_yf(self,
-                            symbols: List,
-                            expiry: int,
-                            range: int = 5,         #At the money +- range
-                            ) -> None:
+                                    batch: List,
+                                    range: int = 5,             #At the money +- range
+                                    ) -> None:
         
-        logger.info(f"Handling option: {symbols} - {expiry}")
+        BATCH_SIZE = len(batch)
+        logger.info(f"Handling batch ({BATCH_SIZE}")
   
         try:
             conn = self.pool.getconn()
@@ -674,7 +674,10 @@ class Database:
         data_all = []
         threads = []
 
-        def _download_and_process(data_all, symbol, expiry, range):
+        def _download_and_process(data_all : List, 
+                                  symbol : str, 
+                                  expiry : str, 
+                                  range : int):
             try:
                 ticker = yf.Ticker(symbol,proxy=self.proxies)
                 option = ticker.option_chain(expiry)
@@ -689,7 +692,10 @@ class Database:
 
         try:
 
-            for symbol in symbols:
+            for i in range(BATCH_SIZE):
+                job = batch[i]
+                symbol = job[0]
+                expiry = job[1]
                 t = threading.Thread(target=_download_and_process, args=(data_all,symbol,expiry,range))
                 threads.append(t)
     
@@ -802,8 +808,24 @@ class Database:
                             .itertuples(index=False, name=None))  
 
             return data   
+    def get_implied_volatility(self,
+                               symbol: str,
+                               start: str,
+                               end: str) -> pd.DataFrame:
         
+        logger.info(f"Getting implied_volatility: {symbol}")
+  
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+            return
+
+        pass
     def add_to_watchlist(self,
                          symbol: str,
                         ):
+        
         pass
