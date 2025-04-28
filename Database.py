@@ -692,8 +692,7 @@ class Database:
 
         try:
 
-            for i in range(BATCH_SIZE):
-                job = batch[i]
+            for job in batch:
                 symbol = job[0]
                 expiry = job[1]
                 t = threading.Thread(target=_download_and_process, args=(data_all,symbol,expiry,range))
@@ -729,7 +728,7 @@ class Database:
             logger.error(f"Psycopg2 error: {e}")
         
         except Exception as e:
-            logger.error(f"Unexpecte error for {symbol} - {expiry}: {e}")
+            logger.error(f"Unexpecte error: {e}")
                 
         finally:
             cur.close()
