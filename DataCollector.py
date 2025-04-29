@@ -45,7 +45,6 @@ class DataCollector:
             self.db = db
 
         self.scheduler = BackgroundScheduler(timezone=datetime.UTC)
-        self.option_queue = queue.Queue()
 
     def connect_and_init(self) -> None:
 
@@ -56,6 +55,8 @@ class DataCollector:
         self.init_option_job_queue()
 
     def init_option_job_queue(self) -> None:
+
+        self.option_queue = queue.Queue()
 
         threads = []
 
@@ -109,6 +110,9 @@ class DataCollector:
         except (KeyboardInterrupt, SystemExit):
             self.scheduler.shutdown()
             self.db.disconnect()
+        
+    def shutdown(self) -> None:
+        self.db.disconnect()
 
     def get_expiration_dates(self, 
                              depth : int = 3) -> List:
@@ -151,11 +155,7 @@ class DataCollector:
         
     def handle_market_close(self) -> None:
 
-        if not self.check_open() and self.option_updater is not None:
-
-            logger.info(f"Shutting down option updater")
-            self.option_updater.remove()
-            self.option_updater = None
+        self.check_open()
   
     def update_price(self, 
                      BATCH_SIZE : int = 10) -> None:
@@ -190,9 +190,14 @@ class DataCollector:
         for _ in range(BATCH_SIZE):
             job = self.option_queue.get()
             job_batch.append(job)
-            self.option_queue.put(job)
+            if self.is_market_open:
+                self.option_queue.put(job)
 
         self.db.insert_option_price_bulk_yf(job_batch)
+
+        if not self.is_market_open and self.option_queue.empty():
+            self.option_updater.remove()
+            self.option_updater = None
 
     def update_overview(self,
                         BATCH_SIZE : int = 10) -> None:

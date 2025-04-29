@@ -661,7 +661,7 @@ class Database:
                                     ) -> None:
         
         BATCH_SIZE = len(batch)
-        logger.info(f"Handling batch ({BATCH_SIZE}")
+        logger.info(f"Handling batch ({BATCH_SIZE})")
   
         try:
             conn = self.pool.getconn()

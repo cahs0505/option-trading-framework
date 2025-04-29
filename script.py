@@ -15,4 +15,5 @@ db = Database(remote = args.r,
 
 dc = DataCollector(db)
 dc.connect_and_init()
+print(dc.db.get_symbols())
 dc.start()
