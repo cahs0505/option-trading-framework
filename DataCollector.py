@@ -6,7 +6,7 @@ import threading
 import logging
 import datetime
 import queue
-import argparse
+import pytz
 
 from Database import Database
 from typing import List, Dict
@@ -24,7 +24,7 @@ class DataCollector:
     is_market_open : bool
 
     option_expiry_dates: Dict
-    option_expiry_depth : int = 3
+    option_expiry_depth : datetime.datetime = datetime.datetime.now(pytz.timezone('US/Eastern')) +  datetime.timedelta(days=60)                 
     option_queue : queue.Queue
     symbols_curr : int = 0
     exp_curr : int = 0
@@ -73,18 +73,25 @@ class DataCollector:
     
     def _put_job_queue(self, 
                        symbol: str) -> None:
-            
-            ticker = yf.Ticker(symbol,proxy=self.db.proxies)
-            exp = ticker.options
+            try:
+                ticker = yf.Ticker(symbol,proxy=self.db.proxies)
+                exp = ticker.options
 
-            for i in range(self.option_expiry_depth):
+            except Exception as e:
+                    logger.error(f"{symbol}: {e}")
+                    
+            for e_str in exp:
 
                 try:
-                    self.option_queue.put((symbol,exp[i]))
-
+                    e = datetime.datetime.strptime(e_str,"%Y-%m-%d").replace(tzinfo=pytz.timezone('US/Eastern'))
+                    if e < self.option_expiry_depth:
+                        self.option_queue.put((symbol,e_str))
+                    else:
+                        break
                 except Exception as e:
                     logger.error(f"{symbol}: {e}")
                     continue
+
 
     def start(self) -> None :
 

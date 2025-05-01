@@ -6,3 +6,6 @@ command.txt
 script_local.py
 todo
 analysis.ipynb
+docker-compose.yaml
+
+/stable
