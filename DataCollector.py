@@ -191,20 +191,23 @@ class DataCollector:
             
     def update_option(self, 
                       BATCH_SIZE : int = 10) -> None: 
-    
-        job_batch : List = []
+        
+        if not self.option_queue.empty():
 
-        for _ in range(BATCH_SIZE):
-            job = self.option_queue.get()
-            job_batch.append(job)
-            if self.is_market_open:
-                self.option_queue.put(job)
+            job_batch : List = []
 
-        self.db.insert_option_price_bulk_yf(job_batch)
+            for _ in range(BATCH_SIZE):
 
-        if not self.is_market_open and self.option_queue.empty():
-            self.option_updater.remove()
-            self.option_updater = None
+                job = self.option_queue.get()
+                job_batch.append(job)
+
+                if self.is_market_open:
+                    self.option_queue.put(job)
+
+            self.db.insert_option_price_bulk_yf(job_batch)
+        
+        else:
+            logger.info("Empty job queue.")
 
     def update_overview(self,
                         BATCH_SIZE : int = 10) -> None:
