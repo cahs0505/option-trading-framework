@@ -1,4 +1,11 @@
 .env
+ibc.env
+ib-config-tmpl
+log
+jts.ini
+config.ini
+config
+IBClient
 ca-certificate.crt
 __pycache__
 test.py
@@ -7,5 +14,5 @@ script_local.py
 todo
 analysis.ipynb
 docker-compose.yaml
-
+Dockerfile
 /stable

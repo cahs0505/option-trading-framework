@@ -76,21 +76,22 @@ class DataCollector:
             try:
                 ticker = yf.Ticker(symbol,proxy=self.db.proxies)
                 exp = ticker.options
+            
+                for e_str in exp:
+
+                    try:
+                        e = datetime.datetime.strptime(e_str,"%Y-%m-%d").replace(tzinfo=pytz.timezone('US/Eastern'))
+                        if e < self.option_expiry_depth:
+                            self.option_queue.put((symbol,e_str))
+                        else:
+                            break
+                        
+                    except Exception as e:
+                        logger.error(f"{symbol}: {e}")
+                        continue
 
             except Exception as e:
                     logger.error(f"{symbol}: {e}")
-                    
-            for e_str in exp:
-
-                try:
-                    e = datetime.datetime.strptime(e_str,"%Y-%m-%d").replace(tzinfo=pytz.timezone('US/Eastern'))
-                    if e < self.option_expiry_depth:
-                        self.option_queue.put((symbol,e_str))
-                    else:
-                        break
-                except Exception as e:
-                    logger.error(f"{symbol}: {e}")
-                    continue
 
 
     def start(self) -> None :
