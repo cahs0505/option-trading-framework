@@ -89,6 +89,7 @@ class Database:
     def disconnect(self) -> None:
         logger.info(f"Disconnecting from {self.database_name}") 
         self.pool.closeall()
+        self.pool = None
 
     def set_source(self, 
                    source: DataSource) -> None:

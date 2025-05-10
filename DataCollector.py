@@ -29,7 +29,7 @@ class DataCollector:
     symbols_curr : int = 0
     exp_curr : int = 0
 
-    price_updater: Job = None 
+    resetter: Job = None 
     option_updater: Job = None
     on_market_pre_open: Job = None
     on_market_open: Job = None 
@@ -38,7 +38,7 @@ class DataCollector:
 
     def __init__(self,
                  db : Database):
-        
+
         if db == None:
             self.db = Database()
         else:
@@ -51,9 +51,41 @@ class DataCollector:
         if self.db.pool == None:
             self.db.connect()
         
+        self.resetter = self.scheduler.add_job(self.reset, 'cron', hour=2)
+        
         self.symbols = self.db.get_symbols()
         self.init_option_job_queue()
+        self.init_jobs()
 
+    def start(self) -> None :
+
+        self.scheduler.start()
+
+        # block
+        try:
+            while True:
+                time.sleep(1)
+        except (KeyboardInterrupt, SystemExit):
+            self.stop()
+
+    def stop(self) -> None:
+        logger.info("Shutting down...")
+        self.scheduler.shutdown()
+
+    def reset(self) -> None:
+
+        logger.info("Resetting...")
+
+        #remove everything
+        self.option_queue = None
+        self.remove_jobs()
+
+        #re-init
+        self.symbols = self.db.get_symbols()
+        self.init_option_job_queue()
+        self.init_jobs()
+        
+    
     def init_option_job_queue(self) -> None:
 
         self.option_queue = queue.Queue()
@@ -61,44 +93,41 @@ class DataCollector:
         threads = []
 
         for symbol in self.symbols:
-            t = threading.Thread(target=self._put_job_queue, args=(symbol,))
+            t = threading.Thread(target=self._put_job_queue, args=(symbol,), name=symbol)
             threads.append(t)
        
+        ## prevent rate-limiting, to be re-do
         for t in threads:
+            time.sleep(0.5)
+            logger.debug(f"Handling {t.name} for job queue")
             t.start()
 
         for t in threads:
             t.join()
 
-    
     def _put_job_queue(self, 
                        symbol: str) -> None:
-            try:
-                ticker = yf.Ticker(symbol,proxy=self.db.proxies)
-                exp = ticker.options
-            
-                for e_str in exp:
-
-                    try:
-                        e = datetime.datetime.strptime(e_str,"%Y-%m-%d").replace(tzinfo=pytz.timezone('US/Eastern'))
-                        if e < self.option_expiry_depth:
-                            self.option_queue.put((symbol,e_str))
-                        else:
-                            break
-                        
-                    except Exception as e:
-                        logger.error(f"{symbol}: {e}")
-                        continue
-
-            except Exception as e:
+        try:
+            ticker = yf.Ticker(symbol,proxy=self.db.proxies)
+            exp = ticker.options
+        
+            for e_str in exp:
+                
+                try:
+                    e = datetime.datetime.strptime(e_str,"%Y-%m-%d").replace(tzinfo=pytz.timezone('US/Eastern'))
+                    if e < self.option_expiry_depth:
+                        self.option_queue.put((symbol,e_str))
+                    else:
+                        break
+                    
+                except Exception as e:
                     logger.error(f"{symbol}: {e}")
+                    continue
 
+        except Exception as e:
+                logger.error(f"{symbol}: {e}")
 
-    def start(self) -> None :
-
-        #every day after market close
-        # self.price_updater = self.scheduler.add_job(self.update_price_bulk, 'cron', hour=20, minute=15)
-
+    def init_jobs(self) -> None:
 
         # on market pre-open, open and close
         self.on_market_pre_open = self.scheduler.add_job(self.handle_market_pre_open, 'cron', hour=13, minute=15)
@@ -109,30 +138,16 @@ class DataCollector:
         if self.check_open():
              self.option_updater = self.scheduler.add_job(self.update_option, 'interval', seconds=15)
 
-        self.scheduler.start()
+    def remove_jobs(self) -> None:
 
-        # block
-        try:
-            while True:
-                time.sleep(1)
-        except (KeyboardInterrupt, SystemExit):
-            self.scheduler.shutdown()
-            self.db.disconnect()
-        
-    def shutdown(self) -> None:
-        self.db.disconnect()
-
-    def get_expiration_dates(self, 
-                             depth : int = 3) -> List:
-        
-        ticker = yf.Ticker("MSFT",proxy=self.db.proxies)
-        exp = ticker.options    
-
-        self.option_expiry_depth = depth
-        self.option_expiry_dates = exp[0:depth]
-
-        return self.option_expiry_dates
-
+        if self.on_market_pre_open is not None:
+            self.on_market_pre_open.remove()
+        if self.on_market_open is not None:
+            self.on_market_open.remove()
+        if self.on_market_close is not None:
+            self.on_market_close.remove()
+        if self.option_updater is not None:
+            self.option_updater.remove()
     
     def check_open(self) -> bool:
         
@@ -148,7 +163,6 @@ class DataCollector:
 
     def handle_market_pre_open(self) -> None:
 
-        self.init_option_job_queue()
         self.check_open()
 
     def handle_market_open(self) -> None:
@@ -165,6 +179,10 @@ class DataCollector:
 
         self.check_open()
   
+
+    """
+    Workers
+    """
     def update_price(self, 
                      BATCH_SIZE : int = 10) -> None:
         
