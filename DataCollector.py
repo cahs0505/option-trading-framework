@@ -53,12 +53,12 @@ class DataCollector:
         
         self.resetter = self.scheduler.add_job(self.reset, 'cron', hour=2)
         
-        self.symbols = self.db.get_symbols()
+        self.symbols = self.db.get_symbols()[:10]
         self.init_option_job_queue()
         self.init_jobs()
 
     def start(self) -> None :
-
+        logger.info("Starting collector...")
         self.scheduler.start()
 
         # block
@@ -88,6 +88,7 @@ class DataCollector:
     
     def init_option_job_queue(self) -> None:
 
+        logger.info("Initing option job queue...")
         self.option_queue = queue.Queue()
 
         threads = []
@@ -99,7 +100,7 @@ class DataCollector:
         ## prevent rate-limiting, to be re-do
         for t in threads:
             time.sleep(0.5)
-            logger.debug(f"Handling {t.name} for job queue")
+            logger.info(f"Handling {t.name} for job queue")
             t.start()
 
         for t in threads:
@@ -129,6 +130,8 @@ class DataCollector:
 
     def init_jobs(self) -> None:
 
+        logger.info("initing job...")
+
         # on market pre-open, open and close
         self.on_market_pre_open = self.scheduler.add_job(self.handle_market_pre_open, 'cron', hour=13, minute=15)
         self.on_market_open = self.scheduler.add_job(self.handle_market_open, 'cron', hour=13, minute=31)
@@ -139,6 +142,8 @@ class DataCollector:
              self.option_updater = self.scheduler.add_job(self.update_option, 'interval', seconds=15)
 
     def remove_jobs(self) -> None:
+
+        logger.info("removing job...")
 
         if self.on_market_pre_open is not None:
             self.on_market_pre_open.remove()
@@ -163,20 +168,22 @@ class DataCollector:
 
     def handle_market_pre_open(self) -> None:
 
+        logger.info("Market-pre-open")
         self.check_open()
 
     def handle_market_open(self) -> None:
 
         if self.check_open() and self.option_updater is None :
 
-            logger.info(f"Starting option updater")
+            logger.info("Market-open: Starting option updater")
             self.option_updater = self.scheduler.add_job(self.update_option, 'interval', seconds=15)
 
         elif not self.check_open() :
-            logger.info(f"Market is not open today")
+            logger.info(f"Market-open: Market is not open today")
         
     def handle_market_close(self) -> None:
-
+        
+        logger.info("Market-close")
         self.check_open()
   
 
