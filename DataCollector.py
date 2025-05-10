@@ -53,7 +53,7 @@ class DataCollector:
         
         self.resetter = self.scheduler.add_job(self.reset, 'cron', hour=2)
         
-        self.symbols = self.db.get_symbols()[:10]
+        self.symbols = self.db.get_symbols()
         self.init_option_job_queue()
         self.init_jobs()
 
@@ -182,7 +182,7 @@ class DataCollector:
             logger.info(f"Market-open: Market is not open today")
         
     def handle_market_close(self) -> None:
-        
+
         logger.info("Market-close")
         self.check_open()
   
