@@ -513,18 +513,52 @@ class Database:
             self.pool.putconn(conn)
 
     def add_ticker(self, symbol : str) -> None:
-        pass
 
-    def add_ticker(self, symbol : List) -> None:
-        pass
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+            return
+        
+        try:
+            ticker = yf.Ticker(symbol,proxy=self.proxies)
+
+            TABLE = "ticker"
+            COLUMNS = ["symbol",
+                       "market_cap",
+                       "asset_type",
+                       "industry",
+                       "sector"]
+            
+            data=[(symbol,
+                   ticker.info['marketCap'] if 'marketCap' in ticker.info else None,
+                   ticker.info['quoteType'] if 'quoteType' in ticker.info else None,
+                   ticker.info['industry'] if 'industry' in ticker.info else None,
+                   ticker.info['sector'] if 'sector' in ticker.info else None,
+                   )]
+            
+            print(data)
+            
+            sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
+
+            print(sql)
+
+            execute_values(cur, sql, data)
+            conn.commit()
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+
+        except Exception as e:
+            logger.error(f"Unexpected error for: {e}")
+        
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
 
     def remove_ticker(self, symbol : str) -> None:
         pass
-
-    def remove_ticker(self, symbol : List) -> None:
-        pass
-
-
 
     def get_symbols(self) -> List:
 
