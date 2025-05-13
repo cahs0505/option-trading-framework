@@ -147,12 +147,19 @@ class DataCollector:
 
         if self.on_market_pre_open is not None:
             self.on_market_pre_open.remove()
+            self.on_market_pre_open = None
+
         if self.on_market_open is not None:
             self.on_market_open.remove()
+            self.on_market_open = None
+
         if self.on_market_close is not None:
             self.on_market_close.remove()
+            self.on_market_close = None
+
         if self.option_updater is not None:
             self.option_updater.remove()
+            self.on_market_close = None
     
     def check_open(self) -> bool:
         
