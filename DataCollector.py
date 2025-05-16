@@ -130,7 +130,7 @@ class DataCollector:
 
     def init_jobs(self) -> None:
 
-        logger.info("initing job...")
+        logger.info("initing jobs...")
 
         # on market pre-open, open and close
         self.on_market_pre_open = self.scheduler.add_job(self.handle_market_pre_open, 'cron', hour=13, minute=15)
@@ -138,7 +138,7 @@ class DataCollector:
         self.on_market_close = self.scheduler.add_job(self.handle_market_close, 'cron', hour=20, minute=1)
 
         # add option updater
-        if self.check_open():
+        if self.check_open() and self.option_updater is None:
              self.option_updater = self.scheduler.add_job(self.update_option, 'interval', seconds=15)
 
     def remove_jobs(self) -> None:
@@ -146,18 +146,22 @@ class DataCollector:
         logger.info("removing job...")
 
         if self.on_market_pre_open is not None:
+            logger.info("removing pre_open...")
             self.on_market_pre_open.remove()
             self.on_market_pre_open = None
 
         if self.on_market_open is not None:
+            logger.info("removing market open...")
             self.on_market_open.remove()
             self.on_market_open = None
 
         if self.on_market_close is not None:
+            logger.info("removing market close...")
             self.on_market_close.remove()
             self.on_market_close = None
 
         if self.option_updater is not None:
+            logger.info("removing updater...")
             self.option_updater.remove()
             self.on_market_close = None
     
@@ -241,6 +245,8 @@ class DataCollector:
         
         else:
             logger.info("Empty job queue.")
+
+        logger.info(f"Remaining number of job:{self.option_queue.qsize()} ")
 
     def update_overview(self,
                         BATCH_SIZE : int = 10) -> None:
