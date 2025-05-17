@@ -241,6 +241,10 @@ class DataCollector:
                 if self.is_market_open:
                     self.option_queue.put(job)
 
+                if self.option_queue.empty():
+                    break
+            
+            logger.info(f"Job batch:{job_batch}")
             self.db.insert_option_price_bulk_yf(job_batch)
         
         else:
