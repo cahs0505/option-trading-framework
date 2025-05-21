@@ -163,7 +163,7 @@ class DataCollector:
         if self.option_updater is not None:
             logger.info("removing updater...")
             self.option_updater.remove()
-            self.on_market_close = None
+            self.option_updater = None
     
     def check_open(self) -> bool:
         
