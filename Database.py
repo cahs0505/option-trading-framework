@@ -95,6 +95,10 @@ class Database:
                    source: DataSource) -> None:
         self.source = source
 
+    """
+    YFinance
+    """
+
     #OHLCV data using YFinance
     def create_price_table_yf(self) -> None:
         
@@ -480,14 +484,13 @@ class Database:
     
     def update_tickers_overview(self,
                                symbol : str) -> None:
+        
+        logging.info(f"Updating ticker overview: {symbol}")
+        
         try:
             conn = self.pool.getconn()
             cur = conn.cursor()
-        except psycopg2.Error as e:
-            logger.error(f"Psycopg2 error: {e}")
-            return
-        
-        try:
+
             ticker = yf.Ticker(symbol,proxy=self.proxies)
             market_cap = ticker.info["marketCap"]
             sql = """
@@ -507,6 +510,49 @@ class Database:
 
         except Exception as e:
             logger.error(f"Unexpecte error for: {e}")
+        
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+
+    def update_sec_filing(self,
+                       symbol: str) -> None:
+       
+        logging.info(f"Updating sec filing info: {symbol}")
+
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+
+            TABLE = "sec_filing"
+            COLUMNS = ["symbol","type","date"]            
+            sql = f"SELECT * FROM {TABLE} WHERE symbol = %(symbol)s ORDER BY date DESC LIMIT 1;"
+            value = {
+                "symbol" : symbol,
+            }
+            cur.execute(sql,value)
+            last_row = cur.fetchone()
+
+            if last_row != None:
+                
+                last_date = last_row[2]
+
+                ticker = yf.Ticker(symbol,proxy=self.proxies)
+                data = list(filter(lambda d : (d["type"] == "10-Q" and d["date"]>last_date),ticker.sec_filings))
+
+                if len(data)>0:
+                    data_all = []
+                    for d in data:
+                        data_all.append((symbol,"10Q",d["date"]))
+                        
+                    sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
+                    cur.execute(sql,data_all)
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
         
         finally:
             cur.close()
@@ -537,12 +583,8 @@ class Database:
                    ticker.info['industry'] if 'industry' in ticker.info else None,
                    ticker.info['sector'] if 'sector' in ticker.info else None,
                    )]
-            
-            print(data)
-            
+                  
             sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
-
-            print(sql)
 
             execute_values(cur, sql, data)
             conn.commit()
@@ -586,7 +628,6 @@ class Database:
             cur.close()
             self.pool.putconn(conn)
 
-    
     #option data
 
     def create_option_table_yf(self) -> None:
@@ -842,22 +883,58 @@ class Database:
                             .itertuples(index=False, name=None))  
 
             return data   
-    def get_implied_volatility(self,
-                               symbol: str,
-                               start: str,
-                               end: str) -> pd.DataFrame:
+    
+    def get_option_data_yf(self,
+                        symbol: str,
+                        columns: List = ["time",
+                                        "contract",
+                                        "strike",
+                                        "expiry",
+                                        "call_put",
+                                        "last_price",
+                                        "volume",
+                                        "open_interest",
+                                        "moneyness",
+                                        "bid",
+                                        "ask",
+                                        "implied_volatility",
+                                        "time_of_snapshot"
+                                        ]) -> pd.DataFrame:
         
-        logger.info(f"Getting implied_volatility: {symbol}")
+        logger.info(f"Getting option data: {symbol}")
   
         try:
             conn = self.pool.getconn()
             cur = conn.cursor()
+            
+            TABLE = "option_yf"
+            
+            sql = f"""SELECT {','.join(columns)} FROM {TABLE} WHERE symbol = %s AND moneyness = 'a' AND call_put = 'c' ORDER BY time;"""
+            cur.execute(sql,(symbol,))
+            conn.commit()
+            
+            data = cur.fetchall()
+
+            df = pd.DataFrame(data, columns=columns)        
+            df.set_index("time", inplace=True)
+            df.index = pd.to_datetime(df.index, utc=True)
+
+            return df
 
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error: {e}")
-            return
+        
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
 
-        pass
+
+      
+    """
+    Polygon API
+    """
+
+
     def add_to_watchlist(self,
                          symbol: str,
                         ):

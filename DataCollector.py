@@ -21,6 +21,7 @@ class DataCollector:
     db : Database
     scheduler: BackgroundScheduler
     symbols: List
+    symbols_len: int
     is_market_open : bool
 
     option_expiry_dates: Dict
@@ -30,10 +31,14 @@ class DataCollector:
     exp_curr : int = 0
 
     resetter: Job = None 
-    option_updater: Job = None
+    
     on_market_pre_open: Job = None
     on_market_open: Job = None 
     on_market_close: Job = None 
+
+    option_updater: Job = None
+    general_info_updater: Job = None
+    general_info_curr : int = 0
 
 
     def __init__(self,
@@ -54,6 +59,7 @@ class DataCollector:
         self.resetter = self.scheduler.add_job(self.reset, 'cron', hour=2)
         
         self.symbols = self.db.get_symbols()
+        self.symbols.len = len(self.symbols)
         self.init_option_job_queue()
         self.init_jobs()
 
@@ -82,10 +88,11 @@ class DataCollector:
 
         #re-init
         self.symbols = self.db.get_symbols()
+        self.symbols_len = len(self.symbols)
+        self.general_info_curr = 0
         self.init_option_job_queue()
         self.init_jobs()
-        
-    
+                
     def init_option_job_queue(self) -> None:
 
         logger.info("Initing option job queue...")
@@ -140,6 +147,9 @@ class DataCollector:
         # add option updater
         if self.check_open() and self.option_updater is None:
              self.option_updater = self.scheduler.add_job(self.update_option, 'interval', seconds=15)
+        
+        # add general info updater
+        self.general_info_updater = self.scheduler.add_job(self.update_general_info, 'interval', seconds=30)
 
     def remove_jobs(self) -> None:
 
@@ -164,7 +174,12 @@ class DataCollector:
             logger.info("removing updater...")
             self.option_updater.remove()
             self.option_updater = None
-    
+
+        if self.general_info_updater is not None:
+            logger.info("removing general info updater...")
+            self.general_info_updater.remove()
+            self.general_info_updater = None
+
     def check_open(self) -> bool:
         
         exchange = mcal.get_calendar("NYSE")
@@ -252,22 +267,11 @@ class DataCollector:
 
         logger.info(f"Remaining number of job:{self.option_queue.qsize()} ")
 
-    def update_overview(self,
-                        BATCH_SIZE : int = 10) -> None:
-        
-        for i in range(0, len(self.symbols), BATCH_SIZE):
+    def update_general_info(self) -> None:
+        symbol = self.symbols[self.symbols_curr]
+        logger.info(f"Updating ticker general info: {symbol}")
 
-            logger.info(f"Handling batch at {i} to {i+BATCH_SIZE}")
-            batch = self.symbols[i:i+BATCH_SIZE]
-            threads = []
-            for i in range(len(batch)):
-                symbol = batch[i]
-                
-                t = threading.Thread(target=self.db.update_tickers_overview, name=symbol ,args=(symbol,))
-                threads.append(t)
-            
-            for t in threads:
-                t.start()
+        self.db.update_tickers_overview(symbol=symbol)
+        self.db.update_sec_filing(symbol=symbol)
 
-            for t in threads:
-                t.join()
+        self.symbols_curr = (self.symbols_curr+1)%self.symbols_len
