@@ -59,7 +59,7 @@ class DataCollector:
         self.resetter = self.scheduler.add_job(self.reset, 'cron', hour=2)
         
         self.symbols = self.db.get_symbols()
-        self.symbols.len = len(self.symbols)
+        self.symbols_len = len(self.symbols)
         self.init_option_job_queue()
         self.init_jobs()
 
@@ -92,7 +92,7 @@ class DataCollector:
         self.general_info_curr = 0
         self.init_option_job_queue()
         self.init_jobs()
-                
+
     def init_option_job_queue(self) -> None:
 
         logger.info("Initing option job queue...")
