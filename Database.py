@@ -196,8 +196,19 @@ class Database:
     def get_price_history_yf(self,
                         symbol: str,
                         history: str,
-                        columns: List) -> pd.DataFrame:
+                        columns: List,
+                        use_YF: bool = False) -> pd.DataFrame:
         
+        if use_YF:
+
+            ticker = yf.Ticker(symbol,proxy=self.proxies)
+            df = ticker.history(history)
+            df.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume" :"volume", "Dividends" : "dividends", "Stock Splits": "splits"},inplace=True)
+            df.index = (df.index+ pd.DateOffset(hours=16)).tz_convert("UTC")
+            df.index.name = "time"
+
+            return df[columns]
+
         
         try:
             conn = self.pool.getconn()
@@ -515,6 +526,33 @@ class Database:
             cur.close()
             self.pool.putconn(conn)
 
+    def get_sec_filing(self,
+                       symbol: str) -> List:
+        logger.info(f"Getting sec filing: {symbol}")
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+            sql = "SELECT date FROM sec_filing WHERE symbol = %(symbol)s ORDER BY date DESC;"
+            value = {
+                "symbol": symbol,
+            }
+            cur.execute(sql,value)
+            data = cur.fetchall()
+            data = list(map(lambda tuple : tuple[0],data))
+      
+            return data
+
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
+        
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+
     def update_sec_filing(self,
                        symbol: str) -> None:
        
@@ -544,9 +582,11 @@ class Database:
                     data_all = []
                     for d in data:
                         data_all.append((symbol,"10Q",d["date"]))
-                        
+                    
                     sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
+
                     cur.execute(sql,data_all)
+                    conn.commit()
 
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error: {e}")
@@ -899,7 +939,8 @@ class Database:
                                         "ask",
                                         "implied_volatility",
                                         "time_of_snapshot"
-                                        ]) -> pd.DataFrame:
+                                        ],
+                        expiry: str = None) -> pd.DataFrame:
         
         logger.info(f"Getting option data: {symbol}")
   
