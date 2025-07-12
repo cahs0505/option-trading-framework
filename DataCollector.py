@@ -25,6 +25,7 @@ class DataCollector:
     is_market_open : bool
 
     option_expiry_dates: Dict
+    #we collect option data with expiry 60 days ahead of now, reset every day
     option_expiry_depth : datetime.datetime = datetime.datetime.now(pytz.timezone('US/Eastern')) +  datetime.timedelta(days=60)                 
     option_queue : queue.Queue
     symbols_curr : int = 0
@@ -38,12 +39,15 @@ class DataCollector:
 
     option_updater: Job = None
     general_info_updater: Job = None
-    general_info_curr : int = 0
+    general_info_curr: int = 0
+
+    #we update earning information in this date range, reset every day
+    latest_unupdated_earning_date: datetime.datetime = None
+    lookahead_earning_date: datetime.datetime = None
 
 
     def __init__(self,
                  db : Database):
-
         if db == None:
             self.db = Database()
         else:
@@ -51,17 +55,20 @@ class DataCollector:
 
         self.scheduler = BackgroundScheduler(timezone=datetime.UTC)
 
-    def connect_and_init(self) -> None:
-
+    def connect_and_init(self,
+                         empty: bool = False) -> None:
         if self.db.pool == None:
             self.db.connect()
         
-        self.resetter = self.scheduler.add_job(self.reset, 'cron', hour=2)
-        
-        self.symbols = self.db.get_symbols()
-        self.symbols_len = len(self.symbols)
-        self.init_option_job_queue()
-        self.init_jobs()
+        if not empty:
+            self.resetter = self.scheduler.add_job(self.reset, 'cron', hour=2)
+            self.symbols = self.db.get_symbols()
+            self.symbols_len = len(self.symbols)
+            self.general_info_curr = 0
+            self.latest_unupdated_earning_date = self.db.get_latest_unupdated_earning_date()
+            self.lookahead_earning_date = datetime.datetime.now()
+            self.init_option_job_queue()
+            self.init_jobs()
 
     def start(self) -> None :
         logger.info("Starting collector...")
@@ -79,7 +86,6 @@ class DataCollector:
         self.scheduler.shutdown()
 
     def reset(self) -> None:
-
         logger.info("Resetting...")
 
         #remove everything
@@ -90,6 +96,8 @@ class DataCollector:
         self.symbols = self.db.get_symbols()
         self.symbols_len = len(self.symbols)
         self.general_info_curr = 0
+        self.latest_unupdated_earning_date = self.db.get_latest_unupdated_earning_date()
+        self.option_expiry_depth = datetime.datetime.now(pytz.timezone('US/Eastern')) +  datetime.timedelta(days=60)
         self.init_option_job_queue()
         self.init_jobs()
 
@@ -136,7 +144,6 @@ class DataCollector:
                 logger.error(f"{symbol}: {e}")
 
     def init_jobs(self) -> None:
-
         logger.info("initing jobs...")
 
         # on market pre-open, open and close
@@ -152,7 +159,6 @@ class DataCollector:
         self.general_info_updater = self.scheduler.add_job(self.update_general_info, 'interval', seconds=30)
 
     def remove_jobs(self) -> None:
-
         logger.info("removing job...")
 
         if self.on_market_pre_open is not None:
@@ -181,7 +187,6 @@ class DataCollector:
             self.general_info_updater = None
 
     def check_open(self) -> bool:
-        
         exchange = mcal.get_calendar("NYSE")
         start = (pd.Timestamp.utcnow() - pd.DateOffset(7)).strftime('%Y-%m-%d')
         end = (pd.Timestamp.utcnow() + pd.DateOffset(7)).strftime('%Y-%m-%d')
@@ -193,12 +198,10 @@ class DataCollector:
         return self.is_market_open
 
     def handle_market_pre_open(self) -> None:
-
         logger.info("Market-pre-open")
         self.check_open()
 
     def handle_market_open(self) -> None:
-
         if self.check_open() and self.option_updater is None :
 
             logger.info("Market-open: Starting option updater")
@@ -208,7 +211,6 @@ class DataCollector:
             logger.info(f"Market-open: Market is not open today")
         
     def handle_market_close(self) -> None:
-
         logger.info("Market-close")
         self.check_open()
   
@@ -218,7 +220,6 @@ class DataCollector:
     """
     def update_price(self, 
                      BATCH_SIZE : int = 10) -> None:
-        
         for i in range(0, len(self.symbols), BATCH_SIZE):
 
             logger.info(f"Handling batch at {i} to {i+BATCH_SIZE}")
@@ -237,13 +238,11 @@ class DataCollector:
                 t.join()
 
     def update_price_bulk(self) -> None:
-        
         self.db.update_price_history_bulk_yf(self.symbols)
 
             
     def update_option(self, 
                       BATCH_SIZE : int = 10) -> None: 
-        
         if not self.option_queue.empty():
 
             job_batch : List = []
@@ -275,3 +274,8 @@ class DataCollector:
         self.db.update_sec_filing(symbol=symbol)
 
         self.symbols_curr = (self.symbols_curr+1)%self.symbols_len
+
+    def update_earnings(self) -> None:
+        
+        pass
+

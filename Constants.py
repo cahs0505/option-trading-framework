@@ -8,6 +8,10 @@ class Position(Enum):
     SHORT = 0
     LONG = 1
 
+class OptionRight(Enum):
+    CALL = 0
+    PUT = 1
+
 class OptionSpread(Enum):
     STRADDLE = 0
     STRANGLE = 1

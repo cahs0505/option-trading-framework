@@ -12,6 +12,7 @@ from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 from typing import List, Dict
 from Constants import DataSource
+from datasource import NasdaqAPI
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -195,20 +196,9 @@ class Database:
 
     def get_price_history_yf(self,
                         symbol: str,
-                        history: str,
                         columns: List,
-                        use_YF: bool = False) -> pd.DataFrame:
-        
-        if use_YF:
-
-            ticker = yf.Ticker(symbol,proxy=self.proxies)
-            df = ticker.history(history)
-            df.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume" :"volume", "Dividends" : "dividends", "Stock Splits": "splits"},inplace=True)
-            df.index = (df.index+ pd.DateOffset(hours=16)).tz_convert("UTC")
-            df.index.name = "time"
-
-            return df[columns]
-
+                        history: str = None
+                        ) -> pd.DataFrame:
         
         try:
             conn = self.pool.getconn()
@@ -224,6 +214,7 @@ class Database:
             data = cur.fetchall()
             df = pd.DataFrame(data, columns=columns)        
             df.set_index("time", inplace=True)
+            df.drop_duplicates(inplace=True)
             df.index = pd.to_datetime(df.index, utc=True)
             return df
 
@@ -249,7 +240,7 @@ class Database:
             cur = conn.cursor()
 
             logger.debug(f"Checking last row: {symbol}")
-            sql = f"SELECT time FROM price_yf WHERE symbol = %s AND time >= NOW() - INTERVAL '7 days' ORDER BY time DESC LIMIT 1;"
+            sql = f"SELECT time FROM price_yf WHERE symbol = %s AND time >= NOW() - INTERVAL '100 days' ORDER BY time DESC LIMIT 1;"
             cur.execute(sql,(symbol,))
             data = cur.fetchall()
             logger.debug(data)
@@ -345,7 +336,9 @@ class Database:
             cur = conn.cursor()
 
             logger.debug(f"Checking last row")
-            sql = f"SELECT time FROM price_yf WHERE symbol = 'MSFT' AND time >= NOW() - INTERVAL '7 days' ORDER BY time DESC LIMIT 1;"
+
+            ##This should be re-implemented (keep a meta-table for last update)
+            sql = f"SELECT time FROM price_yf WHERE symbol = 'AAPL' AND time >= NOW() - INTERVAL '3 months' ORDER BY time DESC LIMIT 1;"
             cur.execute(sql)
             data = cur.fetchall()
             
@@ -389,7 +382,7 @@ class Database:
 
             if not range.empty: 
                 logger.debug(f"Fetching for: {number}")
-                df = yf.download(symbols, period='5d',start=from_string,end=to_string,proxy=self.proxies)
+                df = yf.download(symbols, period='3mo',start=from_string,end=to_string,proxy=self.proxies)
                 df = df[~(df.index < from_string)]
                 df.dropna(axis=1,inplace=True)
                 df.columns = df.columns.remove_unused_levels().set_levels(['close','high','low','open','volume'],level=0)
@@ -701,6 +694,7 @@ class Database:
 
             cur.execute(sql)
             cur.execute("SELECT create_hypertable('option_yf', 'time', 'symbol', number_partitions => 4);")
+            conn.commit()
 
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error: {e}")
@@ -940,9 +934,10 @@ class Database:
                                         "implied_volatility",
                                         "time_of_snapshot"
                                         ],
-                        expiry: str = None) -> pd.DataFrame:
+                        expiry: str = None,
+                        atm_only : bool = True) -> pd.DataFrame:
         
-        logger.info(f"Getting option data: {symbol}")
+        logger.debug(f"Getting option data: {symbol}")
   
         try:
             conn = self.pool.getconn()
@@ -950,8 +945,16 @@ class Database:
             
             TABLE = "option_yf"
             
-            sql = f"""SELECT {','.join(columns)} FROM {TABLE} WHERE symbol = %s AND moneyness = 'a' AND call_put = 'c' ORDER BY time;"""
-            cur.execute(sql,(symbol,))
+            sql = f"""
+                SELECT {','.join(columns)} FROM {TABLE} WHERE 
+                {"expiry = %s AND" if expiry is not None else ""}
+                symbol = %s AND 
+                {"moneyness = 'a' AND" if atm_only is True else ""}
+                call_put = 'c' 
+                ORDER BY time;
+            """
+
+            cur.execute(sql,(expiry,symbol))
             conn.commit()
             
             data = cur.fetchall()
@@ -959,8 +962,42 @@ class Database:
             df = pd.DataFrame(data, columns=columns)        
             df.set_index("time", inplace=True)
             df.index = pd.to_datetime(df.index, utc=True)
+            df.drop_duplicates(inplace=True)
 
             return df
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+        
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+
+    def get_option_expiry_dates_yf(self,
+                                   symbol: str) -> pd.DataFrame:
+        
+        logger.info(f"Getting option expiry: {symbol}")
+  
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+            
+            TABLE = "option_yf"
+            
+            sql = f"""
+                SELECT DISTINCT expiry FROM {TABLE} WHERE 
+                symbol = %s AND 
+                moneyness = 'a' AND 
+                call_put = 'c' 
+            """
+
+            cur.execute(sql,(symbol,))
+            conn.commit()
+            
+            data = cur.fetchall()
+            data = list(map(lambda data : data[0],data))
+
+            return data
 
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error: {e}")
@@ -975,6 +1012,150 @@ class Database:
     Polygon API
     """
 
+    """
+    Nasdaq API
+    """
+    def create_earnings(self) -> None:
+
+        try:
+
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+            
+            sql = """
+                        CREATE TABLE earnings_nasdaq (
+                        symbol TEXT NOT NULL REFERENCES ticker(symbol),
+                        date DATE NOT NULL,
+                        fiscal_quarter_ending CHAR(8) NOT NULL,
+                        eps NUMERIC(6,2),
+                        eps_forecast NUMERIC(6,2),
+                        PRIMARY KEY (symbol, date)
+                        );
+
+                """
+            
+    
+
+            cur.execute(sql)
+            conn.commit()
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
+        
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+
+    def get_earnings(self,
+                     symbol: str = None) -> pd.DataFrame:
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+
+            TABLE = "earnings_nasdaq"
+
+            COLUMNS = [ "symbol",
+                        "date",
+                        "fiscal_quarter_ending",
+                        "eps", 
+                        "eps_forecast"]
+            
+            sql = f"""
+                SELECT * FROM {TABLE} 
+                WHERE 
+                symbol = %s;
+                """
+            cur.execute(sql,(symbol,))
+            conn.commit()
+
+            data = cur.fetchall()
+            df = pd.DataFrame(data,columns=COLUMNS)
+            return df 
+        
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
+        
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+
+        pass
+    
+    def get_latest_unupdated_earning_date(self):
+
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+
+            TABLE = "earnings_nasdaq"
+            sql = f"""
+                    SELECT date FROM {TABLE}
+                    WHERE eps IS NULL
+                    ORDER BY date
+                    ASC LIMIT 1;
+                    """
+            
+            cur.execute(sql)
+            conn.commit()
+
+            data = cur.fetchall()
+            return data[0][0]
+        
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
+        
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+
+
+    def upsert_earnings(self,
+                        data: List) -> None:
+        
+        if len(data) == 0:
+            return
+        
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+
+            TABLE = "earnings_nasdaq"
+            COLUMNS = [ "date",
+                        "symbol",
+                        "eps", 
+                        "eps_forecast",
+                        "fiscal_quarter_ending"]
+            
+            sql =  f"""
+                    INSERT INTO {TABLE} ({','.join(COLUMNS)}) 
+                    VALUES %s
+                    ON CONFLICT (date,symbol) DO UPDATE 
+                    SET (eps,eps_forecast) = (EXCLUDED.eps, EXCLUDED.eps_forecast);
+                    """
+
+            execute_values(cur,sql,data)
+            conn.commit()
+            
+
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
+        
+        finally:
+            cur.close()
+            self.pool.putconn(conn)
+            
 
     def add_to_watchlist(self,
                          symbol: str,
