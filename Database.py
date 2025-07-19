@@ -12,13 +12,16 @@ from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 from typing import List, Dict
 from Constants import DataSource
-from datasource import NasdaqAPI
+from datasource import nasdaq
+from util import validate_date
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 load_dotenv(override=True)
 
-
+"""
+PostgreSQL with TimescaleDB extension
+"""
 class Database:
 
     ##Basic database config
@@ -112,7 +115,8 @@ class Database:
             return
 
         try:
-            sql = f"""CREATE TABLE price_yf (
+            sql = f"""
+                        CREATE TABLE price_yf (
                         time TIMESTAMPTZ NOT NULL,
                         symbol TEXT NOT NULL,
                         open REAL,
@@ -120,8 +124,8 @@ class Database:
                         high REAL,
                         low REAL,
                         volume INTEGER
-                    );
-            )"""
+                        );
+                   """
 
             cur.execute(sql)
             cur.execute("SELECT create_hypertable('price_yf', 'time', 'symbol');")
@@ -228,7 +232,24 @@ class Database:
             cur.close()
             self.pool.putconn(conn)
 
+    def get_latest_date_price_history_yf(self) -> str:
+
+        try:
+            conn = self.pool.getconn()
+            cur = conn.cursor()
+
+            ##This should be re-implemented 
+            sql = f"SELECT time FROM price_yf WHERE symbol = 'AAPL' AND time >= NOW() - INTERVAL '3 months' ORDER BY time DESC LIMIT 1;"
+            cur.execute(sql)
+            data = cur.fetchall()
+            return data
         
+        except psycopg2.Error as e:
+            logger.error(f"Psycopg2 error: {e}")
+
+        finally:
+            self.pool.putconn(conn)
+            
     
     def update_price_history_yf(self,
                              symbol: str) -> None:
@@ -487,7 +508,8 @@ class Database:
             self.pool.putconn(conn)
     
     def update_tickers_overview(self,
-                               symbol : str) -> None:
+                               symbol : str,
+                               market_cap: str) -> None:
         
         logging.info(f"Updating ticker overview: {symbol}")
         
@@ -662,7 +684,6 @@ class Database:
             self.pool.putconn(conn)
 
     #option data
-
     def create_option_table_yf(self) -> None:
 
         try:
@@ -706,29 +727,72 @@ class Database:
             cur.close()
             self.pool.putconn(conn)
 
-    def insert_option_price_yf(self,
-                            symbol: str,
-                            expiry: str, 
-                            range: int = 5,         #At the money +- range
-                            ) -> None:
+    # def insert_option_price_yf(self,
+    #                         symbol: str,
+    #                         expiry: str, 
+    #                         range: int = 5,         #At the money +- range
+    #                         ) -> None:
         
-        logger.info(f"Handling option: {symbol} - {expiry}")
+    #     logger.info(f"Handling option: {symbol} - {expiry}")
   
+    #     try:
+    #         conn = self.pool.getconn()
+    #         cur = conn.cursor()
+
+    #     except psycopg2.Error as e:
+    #         logger.error(f"Psycopg2 error: {e}")
+    #         return
+
+    #     ticker = yf.Ticker(symbol,proxy=self.proxies)
+
+    #     try:
+    #         option = ticker.option_chain(expiry)
+
+    #         data = self._process_option_data(option=option, expiry=expiry, symbol=symbol, range=range)
+
+    #         TABLE = "option_yf"
+    #         COLUMNS = ["time_of_snapshot",
+    #                    "time",
+    #                    "contract",
+    #                    "symbol",
+    #                    "strike",
+    #                    "expiry",
+    #                    "call_put",
+    #                    "last_price",
+    #                    "bid",
+    #                    "ask",
+    #                    "volume",
+    #                    "open_interest",
+    #                    "moneyness",
+    #                    "implied_volatility"]
+            
+    #         sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
+    #         execute_values(cur, sql, data)
+    #         conn.commit()
+
+    #     except ValueError:
+    #         logger.error(f"{symbol} - {expiry} does not exist.")
+            
+        
+    #     except psycopg2.Error as e:
+    #         logger.error(f"Psycopg2 error: {e}")
+        
+    #     except Exception as e:
+    #         logger.error(f"Unexpected error for {symbol} - {expiry}: {e}")
+            
+
+    #     finally:
+    #         cur.close()
+    #         self.pool.putconn(conn)
+
+    def insert_option_data_yf(self,
+                              data: List) -> None:
+        
+        logger.info(f"Inserting  option data (size:{len(data)})")
+
         try:
             conn = self.pool.getconn()
             cur = conn.cursor()
-
-        except psycopg2.Error as e:
-            logger.error(f"Psycopg2 error: {e}")
-            return
-
-        ticker = yf.Ticker(symbol,proxy=self.proxies)
-
-        try:
-            option = ticker.option_chain(expiry)
-
-            data = self._process_option_data(option=option, expiry=expiry, symbol=symbol, range=range)
-            logger.debug(data)
 
             TABLE = "option_yf"
             COLUMNS = ["time_of_snapshot",
@@ -750,177 +814,169 @@ class Database:
             execute_values(cur, sql, data)
             conn.commit()
 
-        except ValueError:
-            logger.error(f"{symbol} - {expiry} does not exist.")
-            
-        
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error: {e}")
-        
-        except Exception as e:
-            logger.error(f"Unexpected error for {symbol} - {expiry}: {e}")
-            
-
+         
         finally:
             cur.close()
             self.pool.putconn(conn)
-
-    def insert_option_price_bulk_yf(self,
-                                    batch: List,
-                                    range: int = 5,             #At the money +- range
-                                    ) -> None:
         
-        BATCH_SIZE = len(batch)
-        logger.info(f"Handling batch ({BATCH_SIZE})")
+    # def insert_option_price_bulk_yf(self,
+    #                                 batch: List,
+    #                                 range: int = 5,             #At the money +- range
+    #                                 ) -> None:
+        
+    #     BATCH_SIZE = len(batch)
+    #     logger.info(f"Handling batch ({BATCH_SIZE})")
   
-        try:
-            conn = self.pool.getconn()
-            cur = conn.cursor()
+    #     try:
+    #         conn = self.pool.getconn()
+    #         cur = conn.cursor()
 
-        except psycopg2.Error as e:
-            logger.error(f"Psycopg2 error: {e}")
-            return
+    #     except psycopg2.Error as e:
+    #         logger.error(f"Psycopg2 error: {e}")
+    #         return
 
-        data_all = []
-        threads = []
+    #     data_all = []
+    #     threads = []
 
-        def _download_and_process(data_all : List, 
-                                  symbol : str, 
-                                  expiry : str, 
-                                  range : int):
-            try:
-                ticker = yf.Ticker(symbol,proxy=self.proxies)
-                option = ticker.option_chain(expiry)
-                data = self._process_option_data(option=option, expiry=expiry, symbol=symbol, range=range)
-                data_all += data
+    #     def _download_and_process(data_all : List, 
+    #                               symbol : str, 
+    #                               expiry : str, 
+    #                               range : int):
+    #         try:
+    #             ticker = yf.Ticker(symbol,proxy=self.proxies)
+    #             option = ticker.option_chain(expiry)
+    #             data = self._process_option_data(option=option, expiry=expiry, symbol=symbol, range=range)
+    #             data_all += data
 
-            except ValueError:
-                logger.error(f"{symbol} - {expiry} does not exist.")
+    #         except ValueError:
+    #             logger.error(f"{symbol} - {expiry} does not exist.")
 
-            except Exception as e:
-                logger.error(f"Unexpecte error for {symbol} - {expiry}: {e}")
+    #         except Exception as e:
+    #             logger.error(f"Unexpecte error for {symbol} - {expiry}: {e}")
 
-        try:
+    #     try:
 
-            for job in batch:
-                symbol = job[0]
-                expiry = job[1]
-                t = threading.Thread(target=_download_and_process, args=(data_all,symbol,expiry,range))
-                threads.append(t)
+    #         for job in batch:
+    #             symbol = job[0]
+    #             expiry = job[1]
+    #             t = threading.Thread(target=_download_and_process, args=(data_all,symbol,expiry,range))
+    #             threads.append(t)
     
-            for t in threads:
-                t.start()
+    #         for t in threads:
+    #             t.start()
 
-            for t in threads:
-                t.join()
+    #         for t in threads:
+    #             t.join()
 
-            TABLE = "option_yf"
-            COLUMNS = ["time_of_snapshot",
-                       "time",
-                       "contract",
-                       "symbol",
-                       "strike",
-                       "expiry",
-                       "call_put",
-                       "last_price",
-                       "bid",
-                       "ask",
-                       "volume",
-                       "open_interest",
-                       "moneyness",
-                       "implied_volatility"]
+    #         TABLE = "option_yf"
+    #         COLUMNS = ["time_of_snapshot",
+    #                    "time",
+    #                    "contract",
+    #                    "symbol",
+    #                    "strike",
+    #                    "expiry",
+    #                    "call_put",
+    #                    "last_price",
+    #                    "bid",
+    #                    "ask",
+    #                    "volume",
+    #                    "open_interest",
+    #                    "moneyness",
+    #                    "implied_volatility"]
             
-            sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
-            execute_values(cur, sql, data_all)
-            conn.commit()
+    #         sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
+    #         execute_values(cur, sql, data_all)
+    #         conn.commit()
         
-        except psycopg2.Error as e:
-            logger.error(f"Psycopg2 error: {e}")
+    #     except psycopg2.Error as e:
+    #         logger.error(f"Psycopg2 error: {e}")
         
-        except Exception as e:
-            logger.error(f"Unexpecte error: {e}")
+    #     except Exception as e:
+    #         logger.error(f"Unexpecte error: {e}")
                 
-        finally:
-            cur.close()
-            self.pool.putconn(conn)
+    #     finally:
+    #         cur.close()
+    #         self.pool.putconn(conn)
     
-    def _process_option_data(self,
-                             option: pd.DataFrame,
-                             symbol: str,
-                             expiry: str,
-                             range: int) -> List:
+    # def _process_option_data(self,
+    #                          option: pd.DataFrame,
+    #                          symbol: str,
+    #                          expiry: str,
+    #                          range: int) -> List:
             
-            time_of_snapshot = pd.Timestamp.utcnow()
-            calls = option.calls
-            calls["call_put"] = 'c'
-            if not calls[calls.inTheMoney == True].empty:
+    #         time_of_snapshot = pd.Timestamp.utcnow()
+    #         calls = option.calls
+    #         calls["call_put"] = 'c'
+    #         if not calls[calls.inTheMoney == True].empty:
                 
-                atm_idx = calls [calls.inTheMoney == True].iloc[-1:].index[0]
-                calls['moneyness'] = calls.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
-                calls.at[atm_idx, 'moneyness'] = 'a'
+    #             atm_idx = calls [calls.inTheMoney == True].iloc[-1:].index[0]
+    #             calls['moneyness'] = calls.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
+    #             calls.at[atm_idx, 'moneyness'] = 'a'
 
-                start_index = (atm_idx-range) if (atm_idx-range)>0 else 0
-                end_index = (atm_idx+range) if (atm_idx+range) < len(calls) else  len(calls)-1
+    #             start_index = (atm_idx-range) if (atm_idx-range)>0 else 0
+    #             end_index = (atm_idx+range) if (atm_idx+range) < len(calls) else  len(calls)-1
 
-                calls = calls.iloc[start_index : end_index]
-            else:
-                calls['moneyness'] = calls.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
-                calls = calls.iloc[:range]
+    #             calls = calls.iloc[start_index : end_index]
+    #         else:
+    #             calls['moneyness'] = calls.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
+    #             calls = calls.iloc[:range]
 
-            puts = option.puts
-            puts["call_put"] = 'p'
-            if not puts[puts.inTheMoney == True].empty:
+    #         puts = option.puts
+    #         puts["call_put"] = 'p'
+    #         if not puts[puts.inTheMoney == True].empty:
 
-                atm_idx = puts [puts.inTheMoney == True].iloc[:1].index[0]
-                puts['moneyness'] = puts.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
-                puts.at[atm_idx, 'moneyness'] = 'a'
+    #             atm_idx = puts [puts.inTheMoney == True].iloc[:1].index[0]
+    #             puts['moneyness'] = puts.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
+    #             puts.at[atm_idx, 'moneyness'] = 'a'
 
-                start_index = (atm_idx-range) if (atm_idx-range)>0 else 0
-                end_index = (atm_idx+range) if (atm_idx+range) < len(puts) else  len(puts)-1
+    #             start_index = (atm_idx-range) if (atm_idx-range)>0 else 0
+    #             end_index = (atm_idx+range) if (atm_idx+range) < len(puts) else  len(puts)-1
 
-                puts = puts.iloc[start_index : end_index]
-            else:
-                puts['moneyness'] = puts.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
-                atm_idx = puts.iloc[-1:].index[0]
-                puts = puts.iloc[-range: ]
+    #             puts = puts.iloc[start_index : end_index]
+    #         else:
+    #             puts['moneyness'] = puts.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
+    #             atm_idx = puts.iloc[-1:].index[0]
+    #             puts = puts.iloc[-range: ]
 
-            df = pd.concat([calls,puts])
+    #         df = pd.concat([calls,puts])
 
-            df.rename(columns={"contractSymbol": "contract", 
-                               "lastTradeDate": "time", 
-                               "lastPrice": "last_price", 
-                               "openInterest": 
-                               "open_interest", 
-                               "impliedVolatility": "implied_volatility"}
-                               ,inplace=True)
+    #         df.rename(columns={"contractSymbol": "contract", 
+    #                            "lastTradeDate": "time", 
+    #                            "lastPrice": "last_price", 
+    #                            "openInterest": 
+    #                            "open_interest", 
+    #                            "impliedVolatility": "implied_volatility"}
+    #                            ,inplace=True)
 
-            df.drop(columns=['change','percentChange','inTheMoney','contractSize','currency'],inplace=True)
-            df["symbol"] = symbol
-            df["expiry"] = expiry
-            df["time_of_snapshot"] = time_of_snapshot
-            df = df.replace({np.nan: None})
+    #         df.drop(columns=['change','percentChange','inTheMoney','contractSize','currency'],inplace=True)
+    #         df["symbol"] = symbol
+    #         df["expiry"] = expiry
+    #         df["time_of_snapshot"] = time_of_snapshot
+    #         df = df.replace({np.nan: None})
  
-            data = list(df[["time_of_snapshot",
-                            "time",
-                            "contract",
-                            "symbol",
-                            "strike",
-                            "expiry",
-                            "call_put",
-                            "last_price",
-                            "bid",
-                            "ask",
-                            "volume",
-                            "open_interest",
-                            "moneyness",
-                            "implied_volatility"]]
-                            .itertuples(index=False, name=None))  
+    #         data = list(df[["time_of_snapshot",
+    #                         "time",
+    #                         "contract",
+    #                         "symbol",
+    #                         "strike",
+    #                         "expiry",
+    #                         "call_put",
+    #                         "last_price",
+    #                         "bid",
+    #                         "ask",
+    #                         "volume",
+    #                         "open_interest",
+    #                         "moneyness",
+    #                         "implied_volatility"]]
+    #                         .itertuples(index=False, name=None))  
 
-            return data   
+    #         return data   
     
     def get_option_data_yf(self,
-                        symbol: str,
-                        columns: List = ["time",
+                           symbol: str,
+                           columns: List = ["time",
                                         "contract",
                                         "strike",
                                         "expiry",
@@ -934,8 +990,8 @@ class Database:
                                         "implied_volatility",
                                         "time_of_snapshot"
                                         ],
-                        expiry: str = None,
-                        atm_only : bool = True) -> pd.DataFrame:
+                           expiry: str = None,
+                           atm_only : bool = True) -> pd.DataFrame:
         
         logger.debug(f"Getting option data: {symbol}")
   
@@ -946,7 +1002,7 @@ class Database:
             TABLE = "option_yf"
             
             sql = f"""
-                SELECT {','.join(columns)} FROM {TABLE} WHERE 
+                SELECT DISTINCT {','.join(columns)} FROM {TABLE} WHERE 
                 {"expiry = %s AND" if expiry is not None else ""}
                 symbol = %s AND 
                 {"moneyness = 'a' AND" if atm_only is True else ""}
@@ -1087,37 +1143,6 @@ class Database:
 
         pass
     
-    def get_latest_unupdated_earning_date(self):
-
-        try:
-            conn = self.pool.getconn()
-            cur = conn.cursor()
-
-            TABLE = "earnings_nasdaq"
-            sql = f"""
-                    SELECT date FROM {TABLE}
-                    WHERE eps IS NULL
-                    ORDER BY date
-                    ASC LIMIT 1;
-                    """
-            
-            cur.execute(sql)
-            conn.commit()
-
-            data = cur.fetchall()
-            return data[0][0]
-        
-        except psycopg2.Error as e:
-            logger.error(f"Psycopg2 error: {e}")
-
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-        
-        finally:
-            cur.close()
-            self.pool.putconn(conn)
-
-
     def upsert_earnings(self,
                         data: List) -> None:
         
@@ -1138,27 +1163,16 @@ class Database:
             sql =  f"""
                     INSERT INTO {TABLE} ({','.join(COLUMNS)}) 
                     VALUES %s
-                    ON CONFLICT (date,symbol) DO UPDATE 
+                    ON CONFLICT (date,symbol,fiscal_quarter_ending) DO UPDATE 
                     SET (eps,eps_forecast) = (EXCLUDED.eps, EXCLUDED.eps_forecast);
                     """
-
+            
             execute_values(cur,sql,data)
             conn.commit()
             
-
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error: {e}")
-
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
         
         finally:
             cur.close()
             self.pool.putconn(conn)
-            
-
-    def add_to_watchlist(self,
-                         symbol: str,
-                        ):
-        
-        pass

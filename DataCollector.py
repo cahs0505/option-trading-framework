@@ -7,44 +7,58 @@ import logging
 import datetime
 import queue
 import pytz
+import os
 
 from Database import Database
-from typing import List, Dict
+from datasource import nasdaq
+from datasource import yahoofinance
+from typing import List, Dict, Set
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.job import Job
 
+from dotenv import load_dotenv
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+load_dotenv(override=True)
+
+"""
+Collect data through different API
+Timezone: UTC
+"""
 
 class DataCollector:
     
     db : Database
+    proxies: Dict
     scheduler: BackgroundScheduler
     symbols: List
+    symbols_set: set
     symbols_len: int
     is_market_open : bool
 
+    #we collect option data with expiry date 60 days ahead of now, reset every day
+    option_updater: Job = None
     option_expiry_dates: Dict
-    #we collect option data with expiry 60 days ahead of now, reset every day
     option_expiry_depth : datetime.datetime = datetime.datetime.now(pytz.timezone('US/Eastern')) +  datetime.timedelta(days=60)                 
     option_queue : queue.Queue
     symbols_curr : int = 0
     exp_curr : int = 0
 
+    #Utility job
     resetter: Job = None 
-    
     on_market_pre_open: Job = None
     on_market_open: Job = None 
     on_market_close: Job = None 
 
-    option_updater: Job = None
+    #Update general information 
     general_info_updater: Job = None
     general_info_curr: int = 0
 
-    #we update earning information in this date range, reset every day
-    latest_unupdated_earning_date: datetime.datetime = None
-    lookahead_earning_date: datetime.datetime = None
-
+    #We update earning information in this date range, reset every day
+    earnings_updater: Job = None
+    curr_earning_date: datetime.date = None
+    lookahead_earning_date: datetime.date = None
 
     def __init__(self,
                  db : Database):
@@ -55,6 +69,14 @@ class DataCollector:
 
         self.scheduler = BackgroundScheduler(timezone=datetime.UTC)
 
+        proxy_username = os.getenv("PROXY_USERNAME")
+        proxy_password = os.getenv("PROXY_PASSWORD")
+        proxy_country = os.getenv("PROXY_COUNTRY")
+        proxy_host = os.getenv("PROXY_HOST")
+        logger.info(f"Using proxy: {proxy_host}")
+        yf.set_config(proxy="PROXY_SERVER")
+        self.proxies = {"http" :('http://user-%s-country-%s:%s@%s'%(proxy_username,proxy_country,proxy_password,proxy_host))}
+
     def connect_and_init(self,
                          empty: bool = False) -> None:
         if self.db.pool == None:
@@ -63,10 +85,11 @@ class DataCollector:
         if not empty:
             self.resetter = self.scheduler.add_job(self.reset, 'cron', hour=2)
             self.symbols = self.db.get_symbols()
+            self.symbols_set = set(self.symbols)
             self.symbols_len = len(self.symbols)
             self.general_info_curr = 0
-            self.latest_unupdated_earning_date = self.db.get_latest_unupdated_earning_date()
-            self.lookahead_earning_date = datetime.datetime.now()
+            self.curr_earning_date = datetime.date.today() - datetime.timedelta(days=5)
+            self.lookahead_earning_date = datetime.date.today() + datetime.timedelta(days=60)
             self.init_option_job_queue()
             self.init_jobs()
 
@@ -96,7 +119,8 @@ class DataCollector:
         self.symbols = self.db.get_symbols()
         self.symbols_len = len(self.symbols)
         self.general_info_curr = 0
-        self.latest_unupdated_earning_date = self.db.get_latest_unupdated_earning_date()
+        self.curr_earning_date = datetime.date.today() - datetime.timedelta(days=5)
+        self.lookahead_earning_date = datetime.date.today() + datetime.timedelta(days=60)
         self.option_expiry_depth = datetime.datetime.now(pytz.timezone('US/Eastern')) +  datetime.timedelta(days=60)
         self.init_option_job_queue()
         self.init_jobs()
@@ -151,12 +175,15 @@ class DataCollector:
         self.on_market_open = self.scheduler.add_job(self.handle_market_open, 'cron', hour=13, minute=31)
         self.on_market_close = self.scheduler.add_job(self.handle_market_close, 'cron', hour=20, minute=1)
 
-        # add option updater
+        # add option data updater
         if self.check_open() and self.option_updater is None:
              self.option_updater = self.scheduler.add_job(self.update_option, 'interval', seconds=15)
         
         # add general info updater
         self.general_info_updater = self.scheduler.add_job(self.update_general_info, 'interval', seconds=30)
+
+        #earnings data
+        self.earnings_updater = self.scheduler.add_job(self.update_earnings, 'interval', seconds = 10)
 
     def remove_jobs(self) -> None:
         logger.info("removing job...")
@@ -186,6 +213,11 @@ class DataCollector:
             self.general_info_updater.remove()
             self.general_info_updater = None
 
+        if self.earnings_updater is not None:
+            logger.info("removing earnings updater...")
+            self.earnings_updater.remove()
+            self.earnings_updater = None
+
     def check_open(self) -> bool:
         exchange = mcal.get_calendar("NYSE")
         start = (pd.Timestamp.utcnow() - pd.DateOffset(7)).strftime('%Y-%m-%d')
@@ -214,9 +246,8 @@ class DataCollector:
         logger.info("Market-close")
         self.check_open()
   
-
     """
-    Workers
+    The actual methods that do the works
     """
     def update_price(self, 
                      BATCH_SIZE : int = 10) -> None:
@@ -240,7 +271,6 @@ class DataCollector:
     def update_price_bulk(self) -> None:
         self.db.update_price_history_bulk_yf(self.symbols)
 
-            
     def update_option(self, 
                       BATCH_SIZE : int = 10) -> None: 
         if not self.option_queue.empty():
@@ -258,8 +288,16 @@ class DataCollector:
                 if self.option_queue.empty():
                     break
             
-            logger.info(f"Job batch:{job_batch}")
-            self.db.insert_option_price_bulk_yf(job_batch)
+            logger.info(f"Option job batch:{job_batch}")
+
+            try:
+                data = yahoofinance.get_option_price_multiple(batch=job_batch,
+                                                              range=5,
+                                                              proxies=self.proxies)
+                self.db.insert_option_data_yf(data=data)
+
+            except Exception as e:
+                logger.error(e)
         
         else:
             logger.info("Empty job queue.")
@@ -270,12 +308,28 @@ class DataCollector:
         symbol = self.symbols[self.symbols_curr]
         logger.info(f"Updating ticker general info: {symbol}")
 
-        self.db.update_tickers_overview(symbol=symbol)
-        self.db.update_sec_filing(symbol=symbol)
+        try:
+            market_cap = yahoofinance.get_market_cap(symbol=symbol,proxies=self.proxies)
+            self.db.update_tickers_overview(symbol=symbol,market_cap=market_cap)
 
-        self.symbols_curr = (self.symbols_curr+1)%self.symbols_len
+        except Exception as e:
+            logger.error(e)
+
+        finally:
+            self.symbols_curr = (self.symbols_curr+1)%self.symbols_len
 
     def update_earnings(self) -> None:
-        
-        pass
+        date_string = self.curr_earning_date.strftime("%Y-%m-%d")
 
+        try:
+            data = nasdaq.get_earnings(date=date_string)
+            data = [row for row in data if row[1] in self.symbols_set]
+            self.db.upsert_earnings(data=data)
+
+        except Exception as e:
+            logger.error(e)
+
+        finally:
+            self.curr_earning_date += datetime.timedelta(days=1)
+            if (self.curr_earning_date > self.lookahead_earning_date):
+                self.curr_earning_date = datetime.date.today() - datetime.timedelta(days=5)
