@@ -2,7 +2,7 @@ import requests
 import logging
 import time
 import re
-from typing import List 
+from typing import List, Dict
 from requests.exceptions import RequestException
 
 headers = {
@@ -13,40 +13,36 @@ headers = {
 earnings_url = 'https://api.nasdaq.com/api/calendar/earnings?date='
 
 
-def get_earnings(date: str) -> List:
+def get_earnings(date: str,
+                 proxies: Dict = None
+                 ) -> List:
 
     data = []
     daily_earnings_url = earnings_url + date
 
-    retries = 5
-    for attempt in range(retries):
+    try:
+        earnings_r = requests.get(daily_earnings_url, headers=headers, timeout=15, proxies=proxies)
+        earnings_r.raise_for_status()
+        earnings_data = earnings_r.json()
 
-        try:
-            earnings_r = requests.get(daily_earnings_url, headers=headers, timeout=15)
-            earnings_r.raise_for_status()
-            earnings_data = earnings_r.json()
+        if not earnings_data.get('data') or not earnings_data['data'].get('rows'):
+            logging.warning(f"No earnings data found for {date}")
 
-            if not earnings_data.get('data') or not earnings_data['data'].get('rows'):
-                logging.warning(f"No earnings data found for {date}")
-                
+        else:
+            companies_earn = earnings_data['data']['rows']
+            for row in companies_earn:
+    
+                row_data = (date,
+                        row["symbol"],
+                        _parse_eps(row["eps"]) if row.get("eps") else None,
+                        _parse_eps(row["epsForecast"]) if row.get("epsForecast") else None,
+                        row["fiscalQuarterEnding"] 
+                )
 
-            else:
-                companies_earn = earnings_data['data']['rows']
-                for row in companies_earn:
-        
-                    row_data = (date,
-                            row["symbol"],
-                            _parse_eps(row["eps"]) if row.get("eps") else None,
-                            _parse_eps(row["epsForecast"]) if row.get("epsForecast") else None,
-                            row["fiscalQuarterEnding"] 
-                    )
+                data.append(row_data)
 
-                    data.append(row_data)
-
-            break
-                
-        except RequestException as e:
-            raise e
+    except RequestException as e:
+        raise e
 
     return data
     

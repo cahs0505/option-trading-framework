@@ -183,7 +183,7 @@ class DataCollector:
         self.general_info_updater = self.scheduler.add_job(self.update_general_info, 'interval', seconds=30)
 
         #earnings data
-        self.earnings_updater = self.scheduler.add_job(self.update_earnings, 'interval', seconds = 10)
+        # self.earnings_updater = self.scheduler.add_job(self.update_earnings, 'interval', seconds = 10)
 
     def remove_jobs(self) -> None:
         logger.info("removing job...")

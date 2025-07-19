@@ -110,11 +110,6 @@ class Database:
             conn = self.pool.getconn()
             cur = conn.cursor()
 
-        except psycopg2.Error as e:
-            logger.error(f"Psycopg2 error: {e}")
-            return
-
-        try:
             sql = f"""
                         CREATE TABLE price_yf (
                         time TIMESTAMPTZ NOT NULL,
@@ -455,11 +450,6 @@ class Database:
         try:
             conn = self.pool.getconn()
             cur = conn.cursor()
-        except psycopg2.Error as e:
-            logger.error(f"Psycopg2 error: {e}")
-            return
-        
-        try:
 
             if not df.empty:
                 data = list(df[["symbol","market_cap","industry","sector","asset_type"]].itertuples(index=False, name=None))
@@ -618,11 +608,7 @@ class Database:
         try:
             conn = self.pool.getconn()
             cur = conn.cursor()
-        except psycopg2.Error as e:
-            logger.error(f"Psycopg2 error: {e}")
-            return
-        
-        try:
+
             ticker = yf.Ticker(symbol,proxy=self.proxies)
 
             TABLE = "ticker"
@@ -662,11 +648,7 @@ class Database:
         try:
             conn = self.pool.getconn()
             cur = conn.cursor()
-        except psycopg2.Error as e:
-            logger.error(f"Psycopg2 error: {e}")
-            return
-        
-        try:
+
             sql = f"SELECT * FROM ticker ORDER BY market_cap DESC"
             cur.execute(sql)
             data = [r[0] for r in cur.fetchall()]
