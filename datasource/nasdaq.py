@@ -46,12 +46,7 @@ def get_earnings(date: str) -> List:
             break
                 
         except RequestException as e:
-            logging.error(f"Attempt {attempt + 1} failed for {date}: {e}")
-            if attempt < retries - 1:
-                delay = 2 ** attempt + 1
-                time.sleep(delay)
-            else:
-                logging.error(f"Max retries reached for {date}. Skipping date.")
+            raise e
 
     return data
     
