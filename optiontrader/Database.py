@@ -11,9 +11,8 @@ import threading
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 from typing import List, Dict
-from Constants import DataSource
-from datasource import nasdaq
-from util import validate_date
+from optiontrader.Constants import DataSource
+from optiontrader.util import validate_date
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -102,7 +101,6 @@ class Database:
     """
     YFinance
     """
-
     #OHLCV data using YFinance
     def create_price_table_yf(self) -> None:
         
@@ -129,9 +127,6 @@ class Database:
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error for: {e}")
             
-        except Exception as e:
-            logger.error(f"Unexpected error for: {e}")
-
         finally:
             cur.close()
             self.pool.putconn(conn)
@@ -184,9 +179,6 @@ class Database:
 
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error for {symbol}: {e}")
-            
-        except Exception as e:
-            logger.error(f"Unexpected error for {symbol}: {e}")
 
         finally:
             cur.close()
@@ -219,9 +211,6 @@ class Database:
 
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error for {symbol}: {e}")
-            
-        except Exception as e:
-            logger.error(f"Unexpected error for {symbol}: {e}")
 
         finally:
             cur.close()
@@ -332,9 +321,6 @@ class Database:
 
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error for {symbol}: {e}")
-            
-        except Exception as e:
-            logger.error(f"Unexpected error for {symbol}: {e}")
 
         finally:
             cur.close()
@@ -342,7 +328,7 @@ class Database:
         
 
     def update_price_history_bulk_yf(self,
-                                symbols : List) -> None:
+                                     symbols : List) -> None:
 
         logger.info(f"Updating price : {symbols} ")
         number = len(symbols)
@@ -434,9 +420,6 @@ class Database:
 
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error for {symbols}: {e}")
-            
-        except Exception as e:
-            logger.error(f"Unexpected error for {symbols}: {e}")
 
         finally:
             cur.close()
@@ -464,9 +447,6 @@ class Database:
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error: {e}")
 
-        except:
-            logger.error(f"Unexpecte error for: {e}")
-        
         finally:
             cur.close()
             self.pool.putconn(conn)
@@ -476,11 +456,7 @@ class Database:
         try:
             conn = self.pool.getconn()
             cur = conn.cursor()
-        except psycopg2.Error as e:
-            logger.error(f"Psycopg2 error: {e}")
-            return
-        
-        try:
+    
             sql = f"SELECT * FROM ticker"
             cur.execute(sql)
             data = cur.fetchall()
@@ -489,9 +465,6 @@ class Database:
 
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error: {e}")
-
-        except Exception as e:
-            logger.error(f"Unexpecte error for: {e}")
         
         finally:
             cur.close()
@@ -501,7 +474,7 @@ class Database:
                                symbol : str,
                                market_cap: str) -> None:
         
-        logging.info(f"Updating ticker overview: {symbol}")
+        logger.info(f"Updating ticker overview: {symbol}")
         
         try:
             conn = self.pool.getconn()
@@ -523,9 +496,6 @@ class Database:
 
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error: {e}")
-
-        except Exception as e:
-            logger.error(f"Unexpecte error for: {e}")
         
         finally:
             cur.close()
@@ -533,7 +503,9 @@ class Database:
 
     def get_sec_filing(self,
                        symbol: str) -> List:
+        
         logger.info(f"Getting sec filing: {symbol}")
+
         try:
             conn = self.pool.getconn()
             cur = conn.cursor()
@@ -547,12 +519,8 @@ class Database:
       
             return data
 
-
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error: {e}")
-
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
         
         finally:
             cur.close()
@@ -561,7 +529,7 @@ class Database:
     def update_sec_filing(self,
                        symbol: str) -> None:
        
-        logging.info(f"Updating sec filing info: {symbol}")
+        logger.info(f"Updating sec filing info: {symbol}")
 
         try:
             conn = self.pool.getconn()
@@ -596,9 +564,6 @@ class Database:
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error: {e}")
 
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-        
         finally:
             cur.close()
             self.pool.putconn(conn)
@@ -632,9 +597,6 @@ class Database:
 
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error: {e}")
-
-        except Exception as e:
-            logger.error(f"Unexpected error for: {e}")
         
         finally:
             cur.close()
@@ -657,9 +619,6 @@ class Database:
 
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error: {e}")
-
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
         
         finally:
             cur.close()
@@ -669,13 +628,9 @@ class Database:
     def create_option_table_yf(self) -> None:
 
         try:
+
             conn = self.pool.getconn()
             cur = conn.cursor()
-        except psycopg2.Error as e:
-            logger.error(f"Psycopg2 error: {e}")
-            return
-
-        try:
             
             sql = f"""CREATE TABLE option_yf (
                         time_of_snapshot TIMESTAMPTZ NOT NULL,
@@ -701,71 +656,10 @@ class Database:
 
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error: {e}")
-
-        except Exception as e:
-            logger.error(f"Unexpecte error: {e}")
         
         finally:
             cur.close()
             self.pool.putconn(conn)
-
-    # def insert_option_price_yf(self,
-    #                         symbol: str,
-    #                         expiry: str, 
-    #                         range: int = 5,         #At the money +- range
-    #                         ) -> None:
-        
-    #     logger.info(f"Handling option: {symbol} - {expiry}")
-  
-    #     try:
-    #         conn = self.pool.getconn()
-    #         cur = conn.cursor()
-
-    #     except psycopg2.Error as e:
-    #         logger.error(f"Psycopg2 error: {e}")
-    #         return
-
-    #     ticker = yf.Ticker(symbol,proxy=self.proxies)
-
-    #     try:
-    #         option = ticker.option_chain(expiry)
-
-    #         data = self._process_option_data(option=option, expiry=expiry, symbol=symbol, range=range)
-
-    #         TABLE = "option_yf"
-    #         COLUMNS = ["time_of_snapshot",
-    #                    "time",
-    #                    "contract",
-    #                    "symbol",
-    #                    "strike",
-    #                    "expiry",
-    #                    "call_put",
-    #                    "last_price",
-    #                    "bid",
-    #                    "ask",
-    #                    "volume",
-    #                    "open_interest",
-    #                    "moneyness",
-    #                    "implied_volatility"]
-            
-    #         sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
-    #         execute_values(cur, sql, data)
-    #         conn.commit()
-
-    #     except ValueError:
-    #         logger.error(f"{symbol} - {expiry} does not exist.")
-            
-        
-    #     except psycopg2.Error as e:
-    #         logger.error(f"Psycopg2 error: {e}")
-        
-    #     except Exception as e:
-    #         logger.error(f"Unexpected error for {symbol} - {expiry}: {e}")
-            
-
-    #     finally:
-    #         cur.close()
-    #         self.pool.putconn(conn)
 
     def insert_option_data_yf(self,
                               data: List) -> None:
@@ -803,159 +697,6 @@ class Database:
             cur.close()
             self.pool.putconn(conn)
         
-    # def insert_option_price_bulk_yf(self,
-    #                                 batch: List,
-    #                                 range: int = 5,             #At the money +- range
-    #                                 ) -> None:
-        
-    #     BATCH_SIZE = len(batch)
-    #     logger.info(f"Handling batch ({BATCH_SIZE})")
-  
-    #     try:
-    #         conn = self.pool.getconn()
-    #         cur = conn.cursor()
-
-    #     except psycopg2.Error as e:
-    #         logger.error(f"Psycopg2 error: {e}")
-    #         return
-
-    #     data_all = []
-    #     threads = []
-
-    #     def _download_and_process(data_all : List, 
-    #                               symbol : str, 
-    #                               expiry : str, 
-    #                               range : int):
-    #         try:
-    #             ticker = yf.Ticker(symbol,proxy=self.proxies)
-    #             option = ticker.option_chain(expiry)
-    #             data = self._process_option_data(option=option, expiry=expiry, symbol=symbol, range=range)
-    #             data_all += data
-
-    #         except ValueError:
-    #             logger.error(f"{symbol} - {expiry} does not exist.")
-
-    #         except Exception as e:
-    #             logger.error(f"Unexpecte error for {symbol} - {expiry}: {e}")
-
-    #     try:
-
-    #         for job in batch:
-    #             symbol = job[0]
-    #             expiry = job[1]
-    #             t = threading.Thread(target=_download_and_process, args=(data_all,symbol,expiry,range))
-    #             threads.append(t)
-    
-    #         for t in threads:
-    #             t.start()
-
-    #         for t in threads:
-    #             t.join()
-
-    #         TABLE = "option_yf"
-    #         COLUMNS = ["time_of_snapshot",
-    #                    "time",
-    #                    "contract",
-    #                    "symbol",
-    #                    "strike",
-    #                    "expiry",
-    #                    "call_put",
-    #                    "last_price",
-    #                    "bid",
-    #                    "ask",
-    #                    "volume",
-    #                    "open_interest",
-    #                    "moneyness",
-    #                    "implied_volatility"]
-            
-    #         sql = f"""INSERT INTO {TABLE} ({','.join(COLUMNS)})VALUES %s;"""
-    #         execute_values(cur, sql, data_all)
-    #         conn.commit()
-        
-    #     except psycopg2.Error as e:
-    #         logger.error(f"Psycopg2 error: {e}")
-        
-    #     except Exception as e:
-    #         logger.error(f"Unexpecte error: {e}")
-                
-    #     finally:
-    #         cur.close()
-    #         self.pool.putconn(conn)
-    
-    # def _process_option_data(self,
-    #                          option: pd.DataFrame,
-    #                          symbol: str,
-    #                          expiry: str,
-    #                          range: int) -> List:
-            
-    #         time_of_snapshot = pd.Timestamp.utcnow()
-    #         calls = option.calls
-    #         calls["call_put"] = 'c'
-    #         if not calls[calls.inTheMoney == True].empty:
-                
-    #             atm_idx = calls [calls.inTheMoney == True].iloc[-1:].index[0]
-    #             calls['moneyness'] = calls.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
-    #             calls.at[atm_idx, 'moneyness'] = 'a'
-
-    #             start_index = (atm_idx-range) if (atm_idx-range)>0 else 0
-    #             end_index = (atm_idx+range) if (atm_idx+range) < len(calls) else  len(calls)-1
-
-    #             calls = calls.iloc[start_index : end_index]
-    #         else:
-    #             calls['moneyness'] = calls.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
-    #             calls = calls.iloc[:range]
-
-    #         puts = option.puts
-    #         puts["call_put"] = 'p'
-    #         if not puts[puts.inTheMoney == True].empty:
-
-    #             atm_idx = puts [puts.inTheMoney == True].iloc[:1].index[0]
-    #             puts['moneyness'] = puts.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
-    #             puts.at[atm_idx, 'moneyness'] = 'a'
-
-    #             start_index = (atm_idx-range) if (atm_idx-range)>0 else 0
-    #             end_index = (atm_idx+range) if (atm_idx+range) < len(puts) else  len(puts)-1
-
-    #             puts = puts.iloc[start_index : end_index]
-    #         else:
-    #             puts['moneyness'] = puts.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
-    #             atm_idx = puts.iloc[-1:].index[0]
-    #             puts = puts.iloc[-range: ]
-
-    #         df = pd.concat([calls,puts])
-
-    #         df.rename(columns={"contractSymbol": "contract", 
-    #                            "lastTradeDate": "time", 
-    #                            "lastPrice": "last_price", 
-    #                            "openInterest": 
-    #                            "open_interest", 
-    #                            "impliedVolatility": "implied_volatility"}
-    #                            ,inplace=True)
-
-    #         df.drop(columns=['change','percentChange','inTheMoney','contractSize','currency'],inplace=True)
-    #         df["symbol"] = symbol
-    #         df["expiry"] = expiry
-    #         df["time_of_snapshot"] = time_of_snapshot
-    #         df = df.replace({np.nan: None})
- 
-    #         data = list(df[["time_of_snapshot",
-    #                         "time",
-    #                         "contract",
-    #                         "symbol",
-    #                         "strike",
-    #                         "expiry",
-    #                         "call_put",
-    #                         "last_price",
-    #                         "bid",
-    #                         "ask",
-    #                         "volume",
-    #                         "open_interest",
-    #                         "moneyness",
-    #                         "implied_volatility"]]
-    #                         .itertuples(index=False, name=None))  
-
-    #         return data   
-    
     def get_option_data_yf(self,
                            symbol: str,
                            columns: List = ["time",
@@ -1044,8 +785,6 @@ class Database:
             cur.close()
             self.pool.putconn(conn)
 
-
-      
     """
     Polygon API
     """
@@ -1071,8 +810,6 @@ class Database:
                         );
 
                 """
-            
-    
 
             cur.execute(sql)
             conn.commit()
@@ -1080,15 +817,13 @@ class Database:
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error: {e}")
 
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-        
         finally:
             cur.close()
             self.pool.putconn(conn)
 
     def get_earnings(self,
                      symbol: str = None) -> pd.DataFrame:
+        
         try:
             conn = self.pool.getconn()
             cur = conn.cursor()
@@ -1115,15 +850,10 @@ class Database:
         
         except psycopg2.Error as e:
             logger.error(f"Psycopg2 error: {e}")
-
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
         
         finally:
             cur.close()
             self.pool.putconn(conn)
-
-        pass
     
     def upsert_earnings(self,
                         data: List) -> None:

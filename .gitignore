@@ -1,4 +1,5 @@
 .env
+secrets
 __pycache__
 
 ##ibc, docker
@@ -7,7 +8,8 @@ log
 jts.ini
 config.ini
 config
-docker-compose.yaml
+docker-compose-dev.yaml
+docker-compose-prod.yaml
 Dockerfile
 /stable
 
@@ -16,7 +18,7 @@ IBKRClient/samples
 IBKRClient/src
 
 
-test.py
+foo.py
 command.txt
 script_local.py
 script_local_2.py
@@ -24,3 +26,6 @@ todo
 analysis.ipynb
 ca-certificate.crt
 data
+Scraper
+ibapi
+.DS_Store

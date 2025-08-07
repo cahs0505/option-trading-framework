@@ -4,7 +4,7 @@ import yfinance as yf
 import numpy as np
 import threading
 import logging
-from util import validate_date
+from optiontrader.util import validate_date
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -135,38 +135,41 @@ def _process_option_data(option: pd.DataFrame,
     Process raw option data from yfinance
     """            
     time_of_snapshot = pd.Timestamp.utcnow()
+    
     calls = option.calls
-    calls["call_put"] = 'c'
-    if not calls[calls.inTheMoney == True].empty:
-        
-        atm_idx = calls [calls.inTheMoney == True].iloc[-1:].index[0]
-        calls['moneyness'] = calls.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
-        calls.at[atm_idx, 'moneyness'] = 'a'
+    if not calls.empty:
+        calls["call_put"] = 'c'
+        if not calls[calls.inTheMoney == True].empty:
+            
+            atm_idx = calls [calls.inTheMoney == True].iloc[-1:].index[0]
+            calls['moneyness'] = calls.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
+            calls.at[atm_idx, 'moneyness'] = 'a'
 
-        start_index = (atm_idx-range) if (atm_idx-range)>0 else 0
-        end_index = (atm_idx+range) if (atm_idx+range) < len(calls) else  len(calls)-1
+            start_index = (atm_idx-range) if (atm_idx-range)>0 else 0
+            end_index = (atm_idx+range) if (atm_idx+range) < len(calls) else  len(calls)-1
 
-        calls = calls.iloc[start_index : end_index]
-    else:
-        calls['moneyness'] = calls.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
-        calls = calls.iloc[:range]
+            calls = calls.iloc[start_index : end_index]
+        else:
+            calls['moneyness'] = calls.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
+            calls = calls.iloc[:range]
 
     puts = option.puts
-    puts["call_put"] = 'p'
-    if not puts[puts.inTheMoney == True].empty:
+    if not puts.empty:
+        puts["call_put"] = 'p'
+        if not puts[puts.inTheMoney == True].empty:
 
-        atm_idx = puts [puts.inTheMoney == True].iloc[:1].index[0]
-        puts['moneyness'] = puts.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
-        puts.at[atm_idx, 'moneyness'] = 'a'
+            atm_idx = puts [puts.inTheMoney == True].iloc[:1].index[0]
+            puts['moneyness'] = puts.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
+            puts.at[atm_idx, 'moneyness'] = 'a'
 
-        start_index = (atm_idx-range) if (atm_idx-range)>0 else 0
-        end_index = (atm_idx+range) if (atm_idx+range) < len(puts) else  len(puts)-1
+            start_index = (atm_idx-range) if (atm_idx-range)>0 else 0
+            end_index = (atm_idx+range) if (atm_idx+range) < len(puts) else  len(puts)-1
 
-        puts = puts.iloc[start_index : end_index]
-    else:
-        puts['moneyness'] = puts.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
-        atm_idx = puts.iloc[-1:].index[0]
-        puts = puts.iloc[-range: ]
+            puts = puts.iloc[start_index : end_index]
+        else:
+            puts['moneyness'] = puts.apply(lambda row :  'i' if row.inTheMoney else 'o' , axis=1)
+            atm_idx = puts.iloc[-1:].index[0]
+            puts = puts.iloc[-range:]
 
     df = pd.concat([calls,puts])
 

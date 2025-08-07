@@ -9,9 +9,8 @@ import queue
 import pytz
 import os
 
-from Database import Database
-from datasource import nasdaq
-from datasource import yahoofinance
+from optiontrader.Database import Database
+from optiontrader.datasource import nasdaq,yahoofinance
 from typing import List, Dict, Set
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.job import Job
@@ -119,7 +118,7 @@ class DataCollector:
         self.symbols = self.db.get_symbols()
         self.symbols_len = len(self.symbols)
         self.general_info_curr = 0
-        self.curr_earning_date = datetime.date.today() - datetime.timedelta(days=5)
+        self.curr_earning_date = datetime.date.today() - datetime.timedelta(days=30)
         self.lookahead_earning_date = datetime.date.today() + datetime.timedelta(days=60)
         self.option_expiry_depth = datetime.datetime.now(pytz.timezone('US/Eastern')) +  datetime.timedelta(days=60)
         self.init_option_job_queue()
@@ -183,7 +182,7 @@ class DataCollector:
         self.general_info_updater = self.scheduler.add_job(self.update_general_info, 'interval', seconds=30)
 
         #earnings data
-        # self.earnings_updater = self.scheduler.add_job(self.update_earnings, 'interval', seconds = 10)
+        self.earnings_updater = self.scheduler.add_job(self.update_earnings, 'interval', seconds = 10)
 
     def remove_jobs(self) -> None:
         logger.info("removing job...")
@@ -320,9 +319,9 @@ class DataCollector:
 
     def update_earnings(self) -> None:
         date_string = self.curr_earning_date.strftime("%Y-%m-%d")
-
+        logger.info(f"Getting earnings info at: {date_string}")
         try:
-            data = nasdaq.get_earnings(date=date_string)
+            data = nasdaq.get_earnings(date=date_string,proxies=None)
             data = [row for row in data if row[1] in self.symbols_set]
             self.db.upsert_earnings(data=data)
 

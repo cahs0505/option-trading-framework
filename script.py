@@ -1,9 +1,8 @@
-from DataCollector import DataCollector
-from Database import Database
-from apscheduler.schedulers.blocking import BlockingScheduler
+from optiontrader.DataCollector import DataCollector
+from optiontrader.Database import Database
 import argparse
 import logging
-import datetime
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -18,8 +17,9 @@ if args.d:
 else:
     logging.basicConfig(level=logging.INFO)
 
-db = Database(remote = args.r, use_proxy = args.p)
-scraper = DataCollector(db)
-scraper.connect_and_init()
-print(scraper.db.get_symbols())
-scraper.start()
+if __name__ == '__main__':
+    db = Database(remote = args.r, use_proxy = args.p)
+    scraper = DataCollector(db)
+    scraper.connect_and_init()
+    print(scraper.db.get_symbols())
+    scraper.start()
