@@ -10,7 +10,6 @@ config.ini
 config
 docker-compose-dev.yaml
 docker-compose-prod.yaml
-Dockerfile
 /stable
 
 #ibkr
