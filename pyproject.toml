@@ -1,8 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "optiontrader"
 version = "0.1.0"
-description = "Semi-automatic opting trading bot"
+description = "Find profitable option spreads, also provide interface with broker, delta hedge, volatility forecast, volatility surface calibration, etc."
+readme = "README.md"
+requires-python = ">=3.13"
+license = {text = "MIT"}
+authors = [
+    {name = "Alvin Chim", email = "cahs0505@gmail.com"}
+]
+dependencies = [
+    "numpy>=2.4.6",
+    "pandas>=3.0.3",
+    "pika>=1.4.2"
+]
 
-[build-system]
-build-backend = "flit_core.buildapi"
-requires = ["flit_core >=3.12,<4"]
+[tool.setuptools.packages.find]
+where = ["."]

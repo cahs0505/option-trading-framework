@@ -1,0 +1,45 @@
+FROM python:3.13.14-slim-bookworm
+
+ENV NUMBA_CPU_NAME=generic \
+    NUMBA_CPU_FEATURES="" \
+    NUMBA_CACHE_DIR=/tmp/numba_cache
+
+# set a directory for the app
+WORKDIR /app
+
+COPY requirements.txt .
+COPY pyproject.toml .
+COPY script ./script
+COPY optiontrader ./optiontrader
+COPY lib ./lib
+
+RUN apt-get update && \
+    apt-get -y install libpq-dev gcc 
+ 
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip3 install -r requirements.txt
+
+#Custom packages
+WORKDIR /app/lib/ibapi
+RUN pip install .
+WORKDIR /app/lib/cody-special
+RUN pip install .
+WORKDIR /app/lib/piecewise-rational
+RUN pip install .
+WORKDIR /app/lib/py_lets_be_rational
+RUN pip install .
+WORKDIR /app
+RUN pip install vollib
+WORKDIR /app/lib/py_vollib_vectorized
+RUN pip install .
+WORKDIR /app/lib/pysvi
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=0.4.3
+RUN pip install .
+
+WORKDIR /app
+RUN pip install .
+
+WORKDIR /app/script/web
+
+# run the command
+CMD ["gunicorn", "web:app", "--worker-class", "gevent", "--workers", "9", "--bind", "0.0.0.0:8000"]

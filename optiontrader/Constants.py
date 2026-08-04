@@ -1,25 +1,54 @@
-from enum import Enum
+from enum import StrEnum
 
-class Asset(Enum):
-    STOCK = 0
-    CRYPTO = 1
+class SecurityType(StrEnum):
+    STOCK = 'STK'
+    OPTION = 'OPT'
+    ETF = 'ETF'
+    OPTION_SPREAD = 'OPTION_SPREAD'
 
-class Position(Enum):
-    SHORT = 0
-    LONG = 1
+class OrderType(StrEnum):
+    LIMIT = 'LMT'
+    MARKET = 'MKT'
+    MID = 'MIDPRICE'
 
-class OptionRight(Enum):
-    CALL = 0
-    PUT = 1
+class Action(StrEnum):
+    BUY = 'BUY'
+    SELL = 'SELL'
 
-class OptionSpread(Enum):
-    STRADDLE = 0
-    STRANGLE = 1
+class OptionRight(StrEnum):
+    CALL = 'CALL'
+    PUT = 'PUT'
 
-class DataSource(Enum):
-    LOCAL = 0
-    REMOTE = 1
-    YFINANCE = 2
+class OptionStyle(StrEnum):
+    AMERICAN = 'AMERICAN'
+    EUROPEAN = 'EUROPEAN'
 
-class Exchange(Enum):
-    NYSE = "NYSE"
+class OptionSpread(StrEnum):
+    STRADDLE = 'STRADDLE'
+    STRANGLE = 'STRANGLE'
+    IRON_CONDOR = 'IRON_CONDOR'
+    
+class DataSource(StrEnum):
+    LOCAL = 'LOCAL'
+    REMOTE = 'REMOTE'
+    YFINANCE = 'YFINANCE'
+    IBKR = 'IBKR'
+
+class Broker(StrEnum):
+    IBKR = 'IBKR'
+    
+class Exchange(StrEnum):
+    NYSE = 'NYSE'
+
+class OrderStatus(StrEnum):
+    INIT = 'Initiated'
+    SUBMITTING = 'Submmiting'           
+    SUBMITTED = 'Submitted'                 
+    PARTIALLY_FILLED = 'Partilly Filled'
+    FILLED = 'Filled'
+    CANCELLED = 'Cancelled'
+    REJECTED = 'Rejected'
+
+YEARLY_TRADING_DAYS = 252
+TRADING_HOURS_PER_DAY = 6.5
+TRADING_MINUTES_PER_DAY = 390
