@@ -73,11 +73,11 @@ services:
     image: rabbitmq:4-management
     container_name: rabbitmq
     ports:
-      - 5672         # AMQP
+      - 5672           # AMQP
       - "15672:15672"  # Management UI
     environment:
-      RABBITMQ_DEFAULT_USER: admin
-      RABBITMQ_DEFAULT_PASS: supersecret
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
@@ -106,8 +106,8 @@ services:
       RABBITMQ_HOST : rabbitmq
       RABBITMQ_PORT : ${RABBITMQ_PORT}
       RABBITMQ_QUEUE : ${RABBITMQ_QUEUE}
-      RABBITMQ_USER: admin
-      RABBITMQ_PASS: supersecret
+      RABBITMQ_USER: guest
+      RABBITMQ_PASS: guest
       RABBITMQ_VHOST: /
 
       DELTA_MARGIN: ${DELTA_MARGIN}
@@ -117,9 +117,6 @@ services:
       VRP_THRESHOLD: ${VRP_THRESHOLD}
       RISK_FREE_INTEREST_RATE: ${RISK_FREE_INTEREST_RATE}
       SPY_ANNUAL_DIVIDEND_YIELD: ${SPY_ANNUAL_DIVIDEND_YIELD}
-
-    volumes:
-     - ./config_core.ini:/app/config_core.ini
     networks:
       - base-network
     depends_on:
@@ -149,7 +146,7 @@ services:
       SPY_ANNUAL_DIVIDEND_YIELD: ${SPY_ANNUAL_DIVIDEND_YIELD}
 
     ports:
-      - 8000:8000
+      - 8000
     networks:
       - base-network
     depends_on:

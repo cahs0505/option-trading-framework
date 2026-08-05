@@ -5,6 +5,8 @@ __pycache__
 lib
 analysis
 model
+docker-compose-dev.yaml
+docker-compose-prod.yaml
 
 ##ibc, docker
 ibc.env
