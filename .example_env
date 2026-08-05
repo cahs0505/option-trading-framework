@@ -2,7 +2,7 @@
 DATABASE_NAME = mydb
 DATABASE_USER = admin
 DATABASE_PASSWORD = 123456
-DATABASE_HOST = db-postgresql-exmplae.db.ondigitalocean.com
+DATABASE_HOST = db-postgresql-example.db.ondigitalocean.com
 DATABASE_PORT = 25060
 
 ### API KEYS ###
