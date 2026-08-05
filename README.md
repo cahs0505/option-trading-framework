@@ -58,7 +58,7 @@ Tech stack: React + Typescript
 The key metric is Volatility Risk Premium (VRP):
 VRP = Implied Volatiltiy (IV) - Realized Volatility(RV)
 
-We construct and train a volatility forecasting model, (for detail, refer to ) make our best volatility forecast, compute IV for SPY option chain, 
+We construct and train a volatility forecasting model, (for detail, refer to https://github.com/cahs0505/volatility_forecasting_with_HAR-X_model) make our best volatility forecast, compute IV for SPY option chain, 
 and find the options that are rich in VRP. If the resulting VRP passes our threshold, we construct an iron condor spread and run Monte Carlo simulation and find expected profit. We finally push this trade if EV passes our threshold. This is the overall logic:
 
 ![Trade Logic](img/trade_logic.drawio.png)
