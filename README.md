@@ -1,6 +1,8 @@
-# option-trader
+# Overview
+Full-stack, multi-container options trading platform.  
+Dockerized system with a modular Core service, RabbitMQ message bus, Flask-Gunicorn API, React-TypeScript dashboard, and PostgreSQL + TimescaleDB Database.
 
-An full stack semi-automated option trading framework and UI. Finds and recommends profitable SPY option spread trades. 
+Finds and recommends SPY option spread trades using volatility risk premium (VRP) and Monte Carlo simulation.
 
 ## Architecture
 ![Architecture Diagram](img/arch.drawio.png)
@@ -8,20 +10,17 @@ An full stack semi-automated option trading framework and UI. Finds and recommen
 This trading framework is fully dockerized and contains the following images:
 
 ### Core
+Modular service that owns trading logic and broker connectivity. Main components:
 
-Main instance of that provides the following functionality:
+- **IBClient** – Interactive Brokers TWS API connectivity
+- **Volatility Forecast Engine** – HAR-X based forecasting
+- **Option Strategy Screener** – VRP-based iron condor discovery + Monte Carlo
+- **Delta Hedge Engine** – automated delta hedging
+- **Order Management System**
+- **Data Scraper** + **Database Interface**
+- **RPC Server** – handles requests from the Web API via RabbitMQ
 
-1. Interactive Broker TWS API client
-2. Scrape option chain data from Yahoofinance
-3. Order management
-4. Volatility forecasting
-5. Fast option greeks and implied volatility computing
-6. Volatility surface modeling
-7. Find profitable option trades through Monte Carlo Simulation
-8. Handle requests from web api through rpc and message queue 
-9. Fully automated delta hedging
-
-The core uses dependency injection (DI) as the main pattern. Theses are the main classes: 
+Uses dependency injection as the primary composition pattern.
 
 ![Core diagram](img/core.drawio.png)
 
@@ -53,10 +52,22 @@ Trading dashboard, trading performance and data visualisation, ordering UI, etc.
 
 Tech stack: React + Typescript
 
+## Design highlights
+The system is deliberately split into independently deployable containers. Core owns all trading state and broker interaction. The Web API is a thin layer that communicates with Core exclusively through RabbitMQ (request/response). This keeps the dashboard responsive and isolates the trading engine. TimescaleDB is used for efficient storage of option chain snapshots and 5-minute bars.
+
+## Tech Stack
+- **Backend / Core**: Python, dependency injection, multithreading
+- **Messaging**: RabbitMQ (request/response between Core and Web API)
+- **API**: Flask + Gunicorn
+- **Frontend**: React + TypeScript
+- **Database**: PostgreSQL + TimescaleDB
+- **Infrastructure**: Docker Compose, DigitalOcean
+- **Data**: Yahoo Finance, Polygon, Nasdaq
+
 ## Trade Logic
 
 The key metric is Volatility Risk Premium (VRP):
-VRP = Implied Volatiltiy (IV) - Realized Volatility(RV)
+VRP = Implied Volatility (IV) - Realized Volatility(RV)
 
 We construct and train a volatility forecasting model, (for detail, refer to https://github.com/cahs0505/volatility_forecasting_with_HAR-X_model) make our best volatility forecast, compute IV for SPY option chain, 
 and find the options that are rich in VRP. If the resulting VRP passes our threshold, we construct an iron condor spread and run Monte Carlo simulation and find expected profit. We finally push this trade if EV passes our threshold. This is the overall logic:
@@ -65,7 +76,10 @@ and find the options that are rich in VRP. If the resulting VRP passes our thres
 
 ## Usage
 
-Create a `docker-compose.yaml`and `.env` and run `docker compose up`. Examples: 
+Create a `docker-compose.yaml`and `.env` and run `docker compose up`. 
+
+Examples: 
+
 `docker-compose.yaml` : 
 ```yaml
 name: trade
